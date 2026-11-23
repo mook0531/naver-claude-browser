@@ -2,8 +2,11 @@
 // MCP 서버(mcp-server.js)가 이 함수들을 Claude의 도구로 노출한다.
 const MAX_TEXT = 40000; // 한 번에 Claude에게 돌려줄 페이지 글자 수 상한
 
-let wc = null; // webview의 webContents
-const setWebContents = (contents) => { wc = contents; };
+let wc = null;        // 지금 보고 있는 탭의 webContents
+let activeId = null;  // 그 탭의 id (예: tab-2)
+let tabsApi = null;   // main.js가 넣어 주는 탭 목록/열기/전환/닫기
+const setActive = (id, contents) => { activeId = id; wc = contents; };
+const setTabs = (api) => { tabsApi = api; };
 const ready = () => {
   if (!wc || wc.isDestroyed()) throw new Error("브라우저 창이 열려 있지 않습니다. 네이버 + Claude 브라우저 앱을 실행하세요.");
   return wc;
@@ -28,7 +31,10 @@ function cap(text, label = "페이지") {
   return text.slice(0, MAX_TEXT) + `\n\n…(${label}가 길어 ${MAX_TEXT.toLocaleString()}자에서 잘렸습니다. 필요한 부분이 더 있으면 스크롤하거나 범위를 좁혀 다시 읽으세요.)`;
 }
 
-const where = () => `현재 페이지: ${ready().getTitle()} — ${ready().getURL()}`;
+const where = () => {
+  const n = tabsApi ? tabsApi.list().length : 1;
+  return `현재 페이지 [${activeId || "tab"}${n > 1 ? `, 탭 ${n}개 열림` : ""}]: ${ready().getTitle()} — ${ready().getURL()}`;
+};
 
 // ---------- 페이지 안에서 실행되는 도우미 ----------
 // 요소마다 ref_N 번호를 붙여 기억한다(같은 요소는 같은 번호). iframe(같은 도메인) 안도 포함.
@@ -304,6 +310,28 @@ async function formInput(ref, value) {
   return `${ref} 값을 설정했습니다.`;
 }
 
+// ---------- 탭 ----------
+const needTabs = () => { if (!tabsApi) throw new Error("탭 기능을 쓸 수 없습니다."); return tabsApi; };
+const fmtTabs = (list) => list.map((t) => `${t.active ? "▶" : " "} ${t.tab_id}: ${t.title || "(제목 없음)"} — ${t.url}`).join("\n");
+const listTabs = async () => `열린 탭 ${needTabs().list().length}개 (▶ = 지금 보고 있는 탭)\n${fmtTabs(needTabs().list())}`;
+async function newTab(url) {
+  if (url) { if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) url = "https://" + url; if (!/^https?:/i.test(url)) throw new Error("http/https 주소만 열 수 있습니다."); }
+  const id = await needTabs().open(url);
+  for (let i = 0; i < 50 && activeId !== id; i++) await sleep(100); // 새 탭으로 전환될 때까지
+  await settle(30000);
+  return `새 탭 ${id}을(를) 열었습니다. ${where()}`;
+}
+async function switchTab(id) {
+  await needTabs().switchTo(id);
+  for (let i = 0; i < 50 && activeId !== id; i++) await sleep(100);
+  return `${id}(으)로 전환했습니다. ${where()}`;
+}
+async function closeTab(id) {
+  await needTabs().close(id || activeId);
+  await sleep(300);
+  return `${id || "현재 탭"}을(를) 닫았습니다.\n${await listTabs()}`;
+}
+
 // 화면 캡처: 좌표가 클릭 좌표(CSS 픽셀)와 같도록 크기를 맞춘다
 async function screenshot(region) {
   const c = ready();
@@ -319,6 +347,6 @@ async function screenshot(region) {
 }
 
 module.exports = {
-  setWebContents, navigate, naverSearch, getPageText, readPage, find, click,
+  setActive, setTabs, listTabs, newTab, switchTab, closeTab, navigate, naverSearch, getPageText, readPage, find, click,
   typeText, pressKey, scroll, scrollTo, formInput, screenshot, where, setConfirm,
 };

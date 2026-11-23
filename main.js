@@ -1,5 +1,5 @@
 // 메인 프로세스: 창 생성, API 키 보관, Claude 호출
-const { app, BrowserWindow, ipcMain, session, safeStorage, screen, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, session, safeStorage, screen, dialog, webContents } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const Anthropic = require("@anthropic-ai/sdk");
@@ -92,16 +92,60 @@ driver.setConfirm(async (message, detail) => {
   }
 });
 
-// webview 안의 새 창(target=_blank) 링크는 같은 webview에서 열기
-app.on("web-contents-created", (_e, contents) => {
-  if (contents.getType() === "webview") {
-    driver.setWebContents(contents); // Claude(MCP)가 조작할 화면
+// ---------- 탭 ----------
+// 화면(renderer)이 탭을 만들고, 여기서는 탭 id ↔ 페이지(webContents)를 기억한다.
+const tabMap = new Map(); // tabId -> webContents
+let activeTab = null;
+const mainWindow = () => BrowserWindow.getAllWindows()[0];
+const toRenderer = (channel, data) => { const w = mainWindow(); if (w) w.webContents.send(channel, data); };
 
-    contents.setWindowOpenHandler(({ url }) => {
-      contents.loadURL(url);
-      return { action: "deny" };
-    });
-  }
+ipcMain.on("tab:register", (_e, id, wcId) => {
+  const wc = webContents.fromId(wcId);
+  if (!wc) return;
+  tabMap.set(id, wc);
+  if (id === activeTab) driver.setActive(id, wc);
+});
+ipcMain.on("tab:activated", (_e, id) => {
+  activeTab = id;
+  if (tabMap.has(id)) driver.setActive(id, tabMap.get(id));
+});
+ipcMain.on("tab:closed", (_e, id) => { tabMap.delete(id); });
+
+// Claude(MCP)의 탭 명령을 화면에 전달하고 결과를 기다린다
+let cmdSeq = 0;
+const pending = new Map();
+ipcMain.on("tabs:cmd-done", (_e, reqId, result) => { const p = pending.get(reqId); if (p) { pending.delete(reqId); p(result); } });
+function tabCommand(op, args = {}) {
+  return new Promise((resolve, reject) => {
+    const reqId = ++cmdSeq;
+    const timer = setTimeout(() => { pending.delete(reqId); reject(new Error("탭 명령 시간 초과")); }, 30000);
+    pending.set(reqId, (r) => { clearTimeout(timer); r.ok ? resolve(r.result) : reject(new Error(r.error)); });
+    toRenderer("tabs:cmd", { reqId, op, args });
+  });
+}
+driver.setTabs({
+  list: () => [...tabMap.entries()].filter(([, wc]) => !wc.isDestroyed())
+    .sort(([a], [b]) => Number(a.split("-")[1]) - Number(b.split("-")[1]))
+    .map(([id, wc]) => ({ tab_id: id, title: wc.getTitle(), url: wc.getURL(), active: id === activeTab })),
+  open: (url) => tabCommand("new", { url }),
+  switchTo: (id) => tabCommand("switch", { id }),
+  close: (id) => tabCommand("close", { id }),
+});
+
+app.on("web-contents-created", (_e, contents) => {
+  if (contents.getType() !== "webview") return;
+  // 새 창으로 여는 링크(target=_blank, Ctrl+클릭)는 새 탭으로
+  contents.setWindowOpenHandler(({ url, disposition }) => {
+    if (/^https?:/i.test(url)) toRenderer("tabs:open", { url, activate: disposition !== "background-tab" });
+    return { action: "deny" };
+  });
+  // 페이지 안에 커서가 있어도 탭 단축키가 동작하도록
+  contents.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown" || !(input.control || input.meta)) return;
+    const k = input.key.toLowerCase();
+    const key = k === "t" ? "new" : k === "w" ? "close" : k === "tab" ? (input.shift ? "prev" : "next") : null;
+    if (key) { event.preventDefault(); toRenderer("tabs:shortcut", key); }
+  });
 });
 
 // ---------- IPC ----------

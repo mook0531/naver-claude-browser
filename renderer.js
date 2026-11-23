@@ -1,24 +1,120 @@
 // 화면 로직: 브라우저 조작 + 페이지 추출 + Claude 대화
 const $ = (id) => document.getElementById(id);
-const view = $("view");
 const MAX_CHARS = 200000; // 한 번에 보낼 페이지 텍스트 상한
+const HOME = "https://www.naver.com";
+
+// ---------- 탭 ----------
+const tabs = new Map(); // id -> { id, view, el }
+let activeId = null;
+let seq = 0;
+const view = () => tabs.get(activeId).view; // 지금 보고 있는 탭의 webview
+
+function createTab(url = HOME, activate = true) {
+  const id = "tab-" + (++seq);
+  const wv = document.createElement("webview");
+  wv.setAttribute("allowpopups", "");
+  wv.src = "about:blank"; // 빈 페이지로 먼저 붙여 바로 등록한 뒤 실제 주소를 연다
+  $("views").appendChild(wv);
+
+  const el = document.createElement("div");
+  el.className = "tab";
+  el.innerHTML = '<span class="title">새 탭</span><button class="close" title="탭 닫기 (Ctrl+W)">×</button>';
+  el.onclick = () => activateTab(id);
+  el.onauxclick = (e) => { if (e.button === 1) closeTab(id); }; // 가운데 클릭으로 닫기
+  el.querySelector(".close").onclick = (e) => { e.stopPropagation(); closeTab(id); };
+  $("tabbar").insertBefore(el, $("new-tab"));
+
+  const tab = { id, view: wv, el, registered: null };
+  tab.registered = new Promise((resolve) => {
+    // 느리거나 실패하는 페이지라도 탭은 바로 조작할 수 있게: 빈 페이지가 준비되면 등록 → 실제 주소 열기
+    wv.addEventListener("dom-ready", () => {
+      window.api.registerTab(id, wv.getWebContentsId());
+      wv.loadURL(url).catch(() => {});
+      resolve();
+    }, { once: true });
+  });
+  const setTitle = (t) => { el.querySelector(".title").textContent = t || wv.getURL() || "새 탭"; el.title = t || ""; };
+  wv.addEventListener("page-title-updated", (e) => setTitle(e.title));
+  wv.addEventListener("did-navigate", (e) => { if (activeId === id && e.url !== "about:blank") $("url").value = e.url; });
+  wv.addEventListener("did-navigate-in-page", (e) => { if (e.isMainFrame && activeId === id) $("url").value = e.url; });
+  tabs.set(id, tab);
+  if (activate || !activeId) activateTab(id);
+  return tab;
+}
+
+function activateTab(id) {
+  const tab = tabs.get(id);
+  if (!tab) return;
+  activeId = id;
+  for (const t of tabs.values()) { t.view.classList.toggle("active", t.id === id); t.el.classList.toggle("active", t.id === id); }
+  let u = "";
+  try { u = tab.view.getURL(); } catch {}
+  $("url").value = u && u !== "about:blank" ? u : "";
+  tab.el.scrollIntoView({ inline: "nearest" });
+  window.api.tabActivated(id);
+}
+
+function closeTab(id) {
+  const tab = tabs.get(id);
+  if (!tab) return;
+  const order = [...tabs.keys()];
+  const i = order.indexOf(id);
+  tab.view.remove();
+  tab.el.remove();
+  tabs.delete(id);
+  window.api.tabClosed(id);
+  if (!tabs.size) createTab(HOME); // 마지막 탭을 닫으면 새 탭
+  else if (activeId === id) activateTab(order[i + 1] || order[i - 1]);
+}
+
+function cycleTab(step) {
+  const order = [...tabs.keys()];
+  activateTab(order[(order.indexOf(activeId) + step + order.length) % order.length]);
+}
+
+$("new-tab").onclick = () => createTab(HOME);
+window.api.onTabsOpen(({ url, activate }) => createTab(url, activate));
+window.api.onTabsShortcut((key) => {
+  if (key === "new") createTab(HOME);
+  else if (key === "close") closeTab(activeId);
+  else if (key === "next") cycleTab(1);
+  else if (key === "prev") cycleTab(-1);
+});
+document.addEventListener("keydown", (e) => {
+  if (!e.ctrlKey && !e.metaKey) return;
+  const k = e.key.toLowerCase();
+  if (k === "t") { e.preventDefault(); createTab(HOME); }
+  else if (k === "w") { e.preventDefault(); closeTab(activeId); }
+  else if (k === "tab") { e.preventDefault(); cycleTab(e.shiftKey ? -1 : 1); }
+});
+
+// Claude(MCP)가 보내는 탭 명령: 새 탭 / 전환 / 닫기
+window.api.onTabsCommand(async ({ reqId, op, args }) => {
+  try {
+    let result = null;
+    if (op === "new") { const t = createTab(args.url || HOME, true); await t.registered; result = t.id; }
+    else if (op === "switch") { if (!tabs.has(args.id)) throw new Error(args.id + " 탭이 없습니다."); activateTab(args.id); result = args.id; }
+    else if (op === "close") { if (!tabs.has(args.id)) throw new Error(args.id + " 탭이 없습니다."); closeTab(args.id); result = activeId; }
+    window.api.tabsCommandDone(reqId, { ok: true, result });
+  } catch (e) {
+    window.api.tabsCommandDone(reqId, { ok: false, error: e.message });
+  }
+});
 
 // ---------- 브라우저 ----------
-$("back").onclick = () => view.canGoBack() && view.goBack();
-$("forward").onclick = () => view.canGoForward() && view.goForward();
-$("reload").onclick = () => view.reload();
-$("home").onclick = () => view.loadURL("https://www.naver.com");
+$("back").onclick = () => view().canGoBack() && view().goBack();
+$("forward").onclick = () => view().canGoForward() && view().goForward();
+$("reload").onclick = () => view().reload();
+$("home").onclick = () => view().loadURL(HOME);
 $("url").addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
   const v = $("url").value.trim();
   if (!v) return;
   const looksLikeUrl = /^https?:\/\//i.test(v) || /^[\w-]+(\.[\w-]+)+(\/.*)?$/.test(v);
-  view.loadURL(looksLikeUrl ? (/^https?:/i.test(v) ? v : "https://" + v)
+  view().loadURL(looksLikeUrl ? (/^https?:/i.test(v) ? v : "https://" + v)
     : "https://search.naver.com/search.naver?query=" + encodeURIComponent(v));
 });
-const syncUrl = (e) => { $("url").value = e.url; };
-view.addEventListener("did-navigate", syncUrl);
-view.addEventListener("did-navigate-in-page", (e) => e.isMainFrame && syncUrl(e));
+createTab(HOME);
 
 // 페이지에서 텍스트 추출 (블로그·카페처럼 iframe 안에 본문이 있는 경우도 포함)
 const EXTRACT = `(() => {
@@ -38,7 +134,7 @@ const EXTRACT = `(() => {
 })()`;
 
 async function getPage() {
-  const p = await view.executeJavaScript(EXTRACT);
+  const p = await view().executeJavaScript(EXTRACT);
   const usingSelection = Boolean(p.selection);
   let body = (usingSelection ? p.selection : p.text).replace(/\n{3,}/g, "\n\n").trim();
   const truncated = body.length > MAX_CHARS;

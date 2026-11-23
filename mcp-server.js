@@ -20,7 +20,9 @@ const INSTRUCTIONS =
   "네이버 광고(searchad.naver.com, ads.naver.com) 설정은 사용자가 요청한 경우에만 바꾸고, 바꾸기 전에 바꿀 내용(캠페인·광고그룹·키워드·입찰가·예산 등)을 표로 보여주고 대화에서 사용자의 승인을 받으세요. " +
   "저장·등록·삭제·켜기/끄기 같은 버튼은 앱이 사용자에게 확인 창을 띄우며, 거부되면 다시 시도하지 말고 사용자에게 물어보세요. " +
   "그 밖의 사이트에서는 글쓰기·설정 변경을 하지 마세요. 사람이 보는 속도로 필요한 만큼만 읽고, 대량 수집은 하지 마세요. " +
-  "요소를 누를 때는 read_page나 find로 받은 ref 번호를 쓰는 것이 좌표보다 정확합니다. 지도처럼 글자로 읽히지 않는 화면만 screenshot을 쓰세요.";
+  "요소를 누를 때는 read_page나 find로 받은 ref 번호를 쓰는 것이 좌표보다 정확합니다. 지도처럼 글자로 읽히지 않는 화면만 screenshot을 쓰세요. " +
+  "브라우저에는 탭이 있습니다. 모든 도구는 지금 보고 있는 탭(결과의 [tab-N])에서 동작합니다. 여러 페이지를 비교할 때는 new_tab으로 열고 switch_tab으로 오가세요. " +
+  "사용자가 열어 둔 탭은 닫지 말고, 작업용으로 연 탭만 필요 없을 때 닫으세요. ref 번호는 탭마다 따로입니다.";
 
 // 도구 호출은 한 번에 하나씩 (같은 화면을 동시에 조작하지 않도록)
 let queue = Promise.resolve();
@@ -95,6 +97,18 @@ function buildServer(onActivity) {
         { type: "text", text: b.where() },
       ],
     }), true);
+
+  tool("list_tabs", "열린 탭 목록(tab_id, 제목, 주소)과 지금 보고 있는 탭을 돌려줍니다.", {},
+    () => "🗂 탭 목록", () => b.listTabs(), true);
+
+  tool("new_tab", "새 탭을 열고 그 탭으로 전환합니다. url을 주면 그 주소를 엽니다(기본: 네이버 홈). 여러 페이지를 비교할 때 쓰세요.",
+    { url: z.string().optional() }, (a) => `➕ 새 탭${a.url ? ": " + a.url : ""}`, (a) => b.newTab(a.url));
+
+  tool("switch_tab", "다른 탭으로 전환합니다. 이후 도구는 그 탭에서 동작합니다.",
+    { tab_id: z.string().describe("예: tab-2 (list_tabs로 확인)") }, (a) => `🗂 ${a.tab_id}로 전환`, (a) => b.switchTab(a.tab_id));
+
+  tool("close_tab", "탭을 닫습니다. 사용자가 열어 둔 탭은 닫지 말고, 작업용으로 연 탭만 닫으세요.",
+    { tab_id: z.string().optional().describe("생략하면 지금 탭") }, (a) => `✖ ${a.tab_id || "현재 탭"} 닫기`, (a) => b.closeTab(a.tab_id));
 
   return server;
 }
