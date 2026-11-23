@@ -32,13 +32,13 @@ const tail = (file, n) => fs.readFileSync(file, "utf8").trim().split(/\r?\n/).sl
 // 1) 설정 등록 여부
 console.log("\n[1] Claude 앱 설정 등록");
 line();
-for (const dir of claudeDirs()) {
-  const cfg = path.join(dir, "claude_desktop_config.json");
+for (const cfg of [path.join(os.homedir(), ".claude.json"), ...claudeDirs().map((d) => path.join(d, "claude_desktop_config.json"))]) {
   if (!fs.existsSync(cfg)) continue;
   try {
     const entry = JSON.parse(fs.readFileSync(cfg, "utf8")).mcpServers?.[SERVER_NAME];
     const bridgeOk = entry && entry.args && fs.existsSync(entry.args[0]);
-    console.log(`${entry ? (bridgeOk ? "OK " : "경로 없음") : "미등록"} : ${cfg}`);
+    const others = Object.keys(JSON.parse(fs.readFileSync(cfg, "utf8")).mcpServers || {}).filter((n) => n !== SERVER_NAME);
+    console.log(`${entry ? (bridgeOk ? "OK " : "경로 없음") : "미등록"} : ${cfg}${others.length ? "  (다른 서버: " + others.join(", ") + ")" : ""}`);
   } catch (e) {
     console.log(`설정 파일 오류: ${cfg} (${e.message})`);
   }
