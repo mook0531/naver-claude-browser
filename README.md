@@ -28,8 +28,11 @@ API 키는 OS 키체인으로 암호화되어 저장되며, 환경변수 `ANTHRO
 Claude 데스크톱 앱이 이 브라우저를 직접 조작해 네이버 검색·네이버 부동산 정보를 가져오게 할 수 있습니다.
 Claude 구독으로 동작하므로 API 키나 추가 비용이 필요 없습니다.
 
-1. 폴더에서 `Claude연결(Windows).bat`(Mac은 `Claude연결(Mac).command`)을 더블클릭합니다.
-2. Claude 앱을 **완전히 종료**(트레이 아이콘 우클릭 → 종료)한 뒤 다시 실행합니다.
+1. `실행(Windows).bat`으로 브라우저 앱을 **한 번 실행**합니다 (앱 위치가 기록됩니다).
+2. Claude 앱 **설정 → 확장 프로그램**(Extensions)에서 폴더의 `naver-browser.mcpb` 파일을 설치합니다
+   (파일을 Claude 앱 설정 창에 끌어다 놓거나, `naver-browser.mcpb`를 더블클릭).
+   - 확장 프로그램 메뉴가 없는 버전이면 `Claude연결(Windows).bat`(Mac은 `Claude연결(Mac).command`)을 실행하고
+     Claude 앱을 **완전히 종료**(트레이 아이콘 우클릭 → 종료)한 뒤 다시 실행합니다. 연결 상태는 `연결확인(Windows).bat`으로 볼 수 있습니다.
 3. Claude 앱에서 "네이버에서 ○○ 검색해 줘", "네이버 부동산에서 ○○아파트 매매 매물 정리해 줘"처럼 요청합니다.
    처음에는 도구 사용 허락 창이 뜹니다. **항상 허용**을 누르세요.
 4. 브라우저 앱이 꺼져 있으면 Claude가 자동으로 실행합니다. Claude가 조작하는 동안 오른쪽 패널 위에 주황색 표시가 나옵니다.
@@ -54,7 +57,9 @@ Claude가 쓸 수 있는 도구: `naver_search`, `navigate`, `get_page_text`, `r
 | `browser-driver.js` | 브라우저 조작(이동, 읽기, 클릭, 입력, 스크롤, 캡처) |
 | `mcp-server.js` | Claude 앱용 MCP 서버 (127.0.0.1, 토큰 인증) |
 | `mcp-bridge.js` | Claude 앱 ↔ 브라우저 연결 다리, 브라우저 자동 실행 |
+| `naver-browser.mcpb`, `extension/` | Claude 앱 확장 프로그램 (다시 만들기: `npm run build:extension`) |
 | `setup-claude.js` | Claude 앱 설정에 연결 등록 (기존 설정 백업) |
+| `check-claude.js` | 연결 점검 |
 | `preload.js` | 화면에 노출하는 안전한 IPC API |
 | `renderer.js` | 브라우저 조작 버튼, 페이지 텍스트 추출, 채팅 UI |
 | `index.html`, `style.css` | 화면 |

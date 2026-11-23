@@ -143,7 +143,7 @@ function startMcpServer({ userDataDir, onActivity = () => {} }) {
   httpServer.on("listening", () => {
     const port = httpServer.address().port;
     fs.mkdirSync(userDataDir, { recursive: true });
-    fs.writeFileSync(infoPath, JSON.stringify({ port, token, pid: process.pid }), { mode: 0o600 });
+    fs.writeFileSync(infoPath, JSON.stringify({ port, token, pid: process.pid, appDir: __dirname }), { mode: 0o600 });
     console.log(`MCP 서버: http://127.0.0.1:${port}/mcp`);
   });
   listen(DEFAULT_PORT);

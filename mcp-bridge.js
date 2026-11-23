@@ -39,8 +39,11 @@ async function ensureApp() {
   if (!launching) {
     launching = (async () => {
       log("브라우저 앱을 실행합니다...");
-      const electron = require(path.join(__dirname, "node_modules", "electron")); // electron 실행 파일 경로
-      const child = spawn(electron, [__dirname], { detached: true, stdio: "ignore", windowsHide: false });
+      // 브라우저 앱 폴더: 이 파일 옆, 아니면 앱이 마지막으로 기록한 위치 (Claude 확장 프로그램으로 설치된 경우)
+      const appDir = [__dirname, info && info.appDir].find((d) => d && fs.existsSync(path.join(d, "node_modules", "electron", "path.txt")));
+      if (!appDir) throw new Error("네이버 + Claude 브라우저 앱을 찾지 못했습니다. 앱 폴더의 '실행(Windows).bat'으로 앱을 한 번 실행해 주세요.");
+      const electron = require(path.join(appDir, "node_modules", "electron")); // electron 실행 파일 경로
+      const child = spawn(electron, [appDir], { detached: true, stdio: "ignore", windowsHide: false });
       child.unref();
       for (let i = 0; i < 120; i++) { // 최대 60초 대기
         await sleep(500);

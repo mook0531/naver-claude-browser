@@ -5,7 +5,8 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "postinstall": "node scripts/install-electron.js"
+    "postinstall": "node scripts/install-electron.js",
+    "build:extension": "node -e \"require('fs').copyFileSync('mcp-bridge.js','extension/server/index.js')\" && npx -y @anthropic-ai/mcpb@2.1.2 pack extension naver-browser.mcpb"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.12.0",
