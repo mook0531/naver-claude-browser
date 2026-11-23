@@ -50,9 +50,22 @@ async function getPage() {
 let mcpTimer = null;
 window.api.onMcpActivity((label) => {
   clearTimeout(mcpTimer);
-  if (label) { $("mcp-activity").textContent = "🤖 Claude가 조작 중 · " + label; $("mcp-activity").hidden = false; }
-  else mcpTimer = setTimeout(() => { $("mcp-activity").hidden = true; }, 1500);
+  if (label) { $("mcp-activity").textContent = "🤖 Claude가 조작 중 · " + label; $("mcp-activity").hidden = false; document.title = "🤖 " + label; }
+  else mcpTimer = setTimeout(() => { $("mcp-activity").hidden = true; document.title = "네이버 + Claude 브라우저"; }, 1500);
 });
+
+// ---------- 앱 안의 Claude 패널 접기/펴기 (창이 좁으면 기본으로 접힘) ----------
+function setPanel(show) {
+  document.body.classList.toggle("panel-hidden", !show);
+  $("toggle-panel").classList.toggle("on", show);
+  try { localStorage.setItem("panel", show ? "1" : "0"); } catch {}
+}
+{
+  let saved = null;
+  try { saved = localStorage.getItem("panel"); } catch {}
+  setPanel(saved === null ? window.innerWidth >= 1100 : saved === "1");
+}
+$("toggle-panel").onclick = () => setPanel(document.body.classList.contains("panel-hidden"));
 
 // ---------- 설정 ----------
 // 고른 모델은 다음 실행 때도 기억

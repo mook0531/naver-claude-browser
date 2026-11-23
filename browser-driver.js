@@ -139,6 +139,25 @@ const PAGE_HELPER = `(() => {
         for (const f of doc.querySelectorAll("iframe")) { try { if (f.contentDocument) walk(f.contentDocument); } catch {} } };
       walk(document); return parts.join("\\n\\n").replace(/\\n{3,}/g, "\\n\\n").trim(); },
     viewport() { return { w: innerWidth, h: innerHeight }; },
+    // 클릭 대상 설명 (안전 확인용): 가장 가까운 누를 수 있는 요소의 글자·종류
+    describeEl(el) {
+      if (!el) return null;
+      let t = el; while (t && t !== document.body && !role(t)) t = t.parentElement;
+      t = t && role(t) ? t : el;
+      const r = role(t) || t.tagName.toLowerCase();
+      return { role: r, text: clean(nameOf(t) || t.innerText || "", 60), type: (t.type || "").toLowerCase(),
+        password: (t.type || "").toLowerCase() === "password", toggle: ["checkbox","radio","switch"].includes(r) };
+    },
+    info(ref) { return this.describeEl(this.el(ref)); },
+    infoAt(x, y) {
+      let el = document.elementFromPoint(x, y), ox = 0, oy = 0;
+      while (el && el.tagName === "IFRAME") { try { const r = el.getBoundingClientRect(); ox += r.left; oy += r.top;
+        const inner = el.contentDocument.elementFromPoint(x - ox, y - oy); if (!inner) break; el = inner; } catch { break; } }
+      return this.describeEl(el);
+    },
+    focused() { let el = document.activeElement;
+      while (el && el.tagName === "IFRAME") { try { el = el.contentDocument.activeElement; } catch { break; } }
+      return el && el !== document.body ? { ...this.describeEl(el), inForm: !!(el.form || el.closest && el.closest("form")) } : null; },
   };
 })();`;
 
@@ -192,6 +211,25 @@ async function readPage(filter, ref, depth = 15) {
   return `${where()}\n\n${cap(tree, "목록")}`;
 }
 
+// ---------- 안전 확인 ----------
+// 저장·삭제·결제 같은 버튼, 네이버 광고의 켜기/끄기, 광고 화면의 Enter 제출은 앱이 직접 사용자에게 묻는다.
+const SENSITIVE = /저장|등록|적용|완료|삭제|제거|결제|충전|구매|신청|게재|발행|전송|제출|변경|수정|해제|중지|중단|시작|켜기|끄기|입찰|확인|동의|\b(on|off|save|submit|delete|remove|apply|confirm|pay|buy|publish)\b/i;
+const AD_HOST = /(^|\.)(searchad\.naver\.com|ads\.naver\.com|gfa\.naver\.com)$/i;
+let confirmFn = async () => false; // main.js가 실제 확인 창으로 바꿔 끼운다
+const setConfirm = (fn) => { confirmFn = fn; };
+const onAdSite = () => { try { return AD_HOST.test(new URL(ready().getURL()).hostname); } catch { return false; } };
+
+// what: "버튼 누르기" / "켜기" / "끄기"
+async function guard(what, info) {
+  if (!info) return;
+  if (info.password) throw new Error("비밀번호 입력란은 조작할 수 없습니다. 로그인은 사용자가 직접 해 주세요.");
+  const sensitive = SENSITIVE.test(info.text) || (onAdSite() && info.toggle);
+  if (!sensitive) return;
+  const label = `"${info.text || info.role}" ${what}`;
+  const ok = await confirmFn(`Claude가 ${label}을(를) 하려고 합니다.`, `페이지: ${ready().getTitle()}\n${ready().getURL()}\n\n허용하면 실제로 실행됩니다.`);
+  if (!ok) throw new Error(`사용자가 ${label}을(를) 허용하지 않았습니다. 다시 시도하지 말고 사용자에게 이유를 물어보세요.`);
+}
+
 const find = async (query) => `${where()}\n\n${await call(`__cb.find(${JSON.stringify(query)})`)}`;
 
 // 마우스 이벤트를 실제 사용자 클릭처럼 보낸다
@@ -199,6 +237,7 @@ async function click({ ref, x, y, button = "left", clickCount = 1 }) {
   const c = ready();
   if (ref) ({ x, y } = await call(`__cb.center(${JSON.stringify(ref)})`));
   if (typeof x !== "number" || typeof y !== "number") throw new Error("ref 또는 x,y 좌표가 필요합니다.");
+  await guard("버튼 누르기", await call(`__cb.infoAt(${x}, ${y})`));
   c.sendInputEvent({ type: "mouseMove", x, y });
   for (let i = 1; i <= clickCount; i++) {
     c.sendInputEvent({ type: "mouseDown", x, y, button, clickCount: i });
@@ -210,6 +249,8 @@ async function click({ ref, x, y, button = "left", clickCount = 1 }) {
 
 async function typeText(text, ref) {
   if (ref) await call(`__cb.focus(${JSON.stringify(ref)})`);
+  const f = await call("__cb.focused()");
+  if (f && f.password) throw new Error("비밀번호 입력란에는 입력할 수 없습니다. 로그인은 사용자가 직접 해 주세요.");
   ready().insertText(text);
   await sleep(200);
   return "입력했습니다.";
@@ -220,6 +261,13 @@ const MODS = { ctrl: "control", control: "control", shift: "shift", alt: "alt", 
 
 async function pressKey(text, repeat = 1) {
   const c = ready();
+  if (/enter|return/i.test(text) && onAdSite()) {
+    const f = await call("__cb.focused()");
+    if (f && f.inForm) {
+      const ok = await confirmFn("Claude가 네이버 광고 입력 양식에서 Enter(제출)를 누르려고 합니다.", `페이지: ${c.getTitle()}\n${c.getURL()}\n\n허용하면 실제로 제출될 수 있습니다.`);
+      if (!ok) throw new Error("사용자가 Enter(제출)를 허용하지 않았습니다.");
+    }
+  }
   for (let i = 0; i < Math.min(repeat, 100); i++) {
     for (const chord of text.trim().split(/\s+/)) {
       const parts = chord.split("+");
@@ -247,7 +295,14 @@ async function scroll(direction = "down", amount = 3, x, y) {
 }
 
 const scrollTo = async (ref) => { await call(`__cb.scrollTo(${JSON.stringify(ref)})`); return `${ref}이(가) 보이도록 스크롤했습니다.`; };
-const formInput = async (ref, value) => { await call(`__cb.setValue(${JSON.stringify(ref)}, ${JSON.stringify(value)})`); await settle(); return `${ref} 값을 설정했습니다.`; };
+async function formInput(ref, value) {
+  const info = await call(`__cb.info(${JSON.stringify(ref)})`);
+  if (info.password) throw new Error("비밀번호 입력란은 조작할 수 없습니다. 로그인은 사용자가 직접 해 주세요.");
+  if (info.toggle && onAdSite()) await guard(value ? "켜기" : "끄기", { ...info, text: info.text || "스위치" });
+  await call(`__cb.setValue(${JSON.stringify(ref)}, ${JSON.stringify(value)})`);
+  await settle();
+  return `${ref} 값을 설정했습니다.`;
+}
 
 // 화면 캡처: 좌표가 클릭 좌표(CSS 픽셀)와 같도록 크기를 맞춘다
 async function screenshot(region) {
@@ -265,5 +320,5 @@ async function screenshot(region) {
 
 module.exports = {
   setWebContents, navigate, naverSearch, getPageText, readPage, find, click,
-  typeText, pressKey, scroll, scrollTo, formInput, screenshot, where,
+  typeText, pressKey, scroll, scrollTo, formInput, screenshot, where, setConfirm,
 };

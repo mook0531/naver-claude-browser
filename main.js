@@ -1,5 +1,5 @@
 // 메인 프로세스: 창 생성, API 키 보관, Claude 호출
-const { app, BrowserWindow, ipcMain, session, safeStorage } = require("electron");
+const { app, BrowserWindow, ipcMain, session, safeStorage, screen, dialog } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const Anthropic = require("@anthropic-ai/sdk");
@@ -43,9 +43,14 @@ function createWindow() {
   const ua = session.defaultSession.getUserAgent().replace(/\s?Electron\/\S+/, "").replace(/\s?naver-claude-browser\/\S+/, "");
   session.defaultSession.setUserAgent(ua);
 
+  // 화면 오른쪽 절반에 띄운다 (왼쪽에 Claude 앱을 두고 함께 보기 좋게)
+  const wa = screen.getPrimaryDisplay().workArea;
+  const width = Math.max(800, Math.round(wa.width / 2));
   const win = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    x: wa.x + wa.width - width,
+    y: wa.y,
+    width,
+    height: wa.height,
     title: "네이버 + Claude 브라우저",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -55,7 +60,37 @@ function createWindow() {
     },
   });
   win.loadFile(path.join(__dirname, "index.html"));
+  return win;
 }
+
+// Claude가 저장·삭제·결제 같은 버튼을 누르기 전에 사용자에게 직접 묻는 창 (2분 안에 답이 없으면 거부)
+driver.setConfirm(async (message, detail) => {
+  const win = BrowserWindow.getAllWindows()[0];
+  if (!win) return false;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 120000);
+  try {
+    const { response } = await dialog.showMessageBox(win, {
+      type: "warning",
+      title: "Claude 작업 확인",
+      message,
+      detail,
+      buttons: ["허용", "거부"],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+      signal: ac.signal,
+    });
+    return response === 0;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+});
 
 // webview 안의 새 창(target=_blank) 링크는 같은 webview에서 열기
 app.on("web-contents-created", (_e, contents) => {
