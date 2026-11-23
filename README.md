@@ -2,6 +2,13 @@
 
 네이버(또는 아무 사이트)를 보면서, 지금 보고 있는 페이지 내용을 Claude에게 보내 요약·정리·질문할 수 있는 데스크톱 브라우저입니다. (Electron + Anthropic SDK)
 
+## 한 번에 설치 (Windows)
+
+1. [Node.js LTS](https://nodejs.org)와 [Claude 데스크톱 앱](https://claude.ai/download)을 설치하고 Claude에 로그인합니다(유료 요금제 필요).
+2. 이 폴더를 `C:\naver-claude-browser`에 두고 **`설치(Windows).bat`** 을 더블클릭합니다.
+   브라우저 설치 → 바탕화면 아이콘 → Claude 앱 연결까지 한 번에 끝납니다.
+3. 직원에게 나눠 줄 때는 ZIP과 함께 **`설치안내.txt`** 를 보내세요.
+
 ## 실행 방법 (쉬운 버전)
 
 1. **Node.js 설치** (처음 한 번만): https://nodejs.org 에서 왼쪽 **LTS** 버튼을 눌러 받아 설치합니다. 설치 중에는 계속 "다음"만 누르면 됩니다.
