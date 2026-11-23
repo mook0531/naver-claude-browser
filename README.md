@@ -2,15 +2,18 @@
 
 네이버(또는 아무 사이트)를 보면서, 지금 보고 있는 페이지 내용을 Claude에게 보내 요약·정리·질문할 수 있는 데스크톱 브라우저입니다. (Electron + Anthropic SDK)
 
-## 실행
+## 실행 방법 (쉬운 버전)
 
-```bash
-npm install
-npm start
-```
+1. **Node.js 설치** (처음 한 번만): https://nodejs.org 에서 왼쪽 **LTS** 버튼을 눌러 받아 설치합니다. 설치 중에는 계속 "다음"만 누르면 됩니다.
+2. **프로그램 받기**: 이 페이지 위쪽 초록색 **Code** 버튼 → **Download ZIP** → 받은 파일을 바탕화면에 압축 풀기.
+3. **실행**: 압축 푼 폴더에서
+   - Windows: `실행(Windows).bat` 더블클릭
+   - Mac: `실행(Mac).command` 우클릭 → 열기
+   처음 한 번은 필요한 파일을 설치하느라 몇 분 걸립니다. 다음부터는 바로 열립니다.
+4. **API 키 넣기** (처음 한 번만): 앱 오른쪽 위 ⚙ 버튼 → https://console.anthropic.com 에서 받은 키(`sk-ant-...`)를 붙여넣고 **저장**.
 
-처음 실행하면 오른쪽 패널에 Anthropic API 키를 입력하세요 (https://console.anthropic.com 에서 발급).
-키는 OS 키체인으로 암호화되어 사용자 데이터 폴더의 `config.json`에 저장됩니다. 환경변수 `ANTHROPIC_API_KEY`가 있으면 그것을 우선 사용합니다.
+터미널을 쓰신다면 `npm install` 후 `npm start`로도 실행할 수 있습니다.
+API 키는 OS 키체인으로 암호화되어 저장되며, 환경변수 `ANTHROPIC_API_KEY`가 있으면 그것을 우선 사용합니다.
 
 ## 사용법
 
