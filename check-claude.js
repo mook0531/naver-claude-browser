@@ -63,6 +63,33 @@ if (!foundLog) {
   console.log("           Claude 앱을 '완전히 종료'한 뒤 다시 켰는지 확인하세요.");
 }
 
+// 2-1) Claude 데스크톱 앱 자체의 기록: 앱이 설치·실행된 적이 있는지, MCP 설정을 읽었는지
+console.log("\n[2-1] Claude 데스크톱 앱 기록");
+line();
+let anyAppLog = false;
+for (const dir of claudeDirs()) {
+  const logDir = path.join(dir, "logs");
+  if (!fs.existsSync(logDir)) continue;
+  const files = fs.readdirSync(logDir).filter((f) => f.endsWith(".log"))
+    .map((f) => ({ f, t: fs.statSync(path.join(logDir, f)).mtime }))
+    .sort((a, b) => b.t - a.t);
+  if (!files.length) continue;
+  anyAppLog = true;
+  console.log(`기록 폴더: ${logDir}`);
+  console.log("  최근 파일: " + files.slice(0, 6).map((x) => `${x.f}(${x.t.toLocaleString()})`).join(", "));
+  for (const name of ["mcp.log", "main.log"]) {
+    const f = path.join(logDir, name);
+    if (!fs.existsSync(f)) continue;
+    const hits = fs.readFileSync(f, "utf8").split(/\r?\n/).filter((l) => /mcp|naver-browser|config|polic/i.test(l)).slice(-8);
+    if (hits.length) { console.log(`  ${name} (MCP 관련 최근 줄):`); for (const l of hits) console.log("    " + l.slice(0, 160)); }
+  }
+}
+if (!anyAppLog) {
+  console.log("Claude 데스크톱 앱 기록이 전혀 없습니다.");
+  console.log("→ 이 PC에서 Claude '데스크톱 앱'이 실행된 적이 없는 것 같습니다.");
+  console.log("  웹사이트(claude.ai)에서는 이 연결을 쓸 수 없습니다. https://claude.ai/download 에서 데스크톱 앱을 설치하세요.");
+}
+
 // 3) 브라우저 연결 실제 동작 (Claude 앱과 같은 방식으로 연결해 본다)
 console.log("\n[3] 브라우저 연결 테스트 (브라우저가 꺼져 있으면 켜집니다)");
 line();
