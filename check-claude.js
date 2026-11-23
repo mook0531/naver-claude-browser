@@ -45,9 +45,14 @@ for (const cfg of [path.join(os.homedir(), ".claude.json"), ...claudeDirs().map(
 }
 
 {
-  const pd = path.join(os.homedir(), ".claude", "skills", SERVER_NAME);
-  const ok = fs.existsSync(path.join(pd, ".claude-plugin", "plugin.json")) && fs.existsSync(path.join(pd, ".mcp.json"));
-  console.log(`${ok ? "OK " : "없음"} : 플러그인 ${pd}`);
+  const sf = path.join(os.homedir(), ".claude", "settings.json");
+  let s = {};
+  try { s = JSON.parse(fs.readFileSync(sf, "utf8")); } catch {}
+  const enabled = s.enabledPlugins && s.enabledPlugins["naver-browser@naver-claude-browser"];
+  const mk = s.extraKnownMarketplaces && s.extraKnownMarketplaces["naver-claude-browser"];
+  const mkPath = mk && mk.source && mk.source.path;
+  console.log(`${enabled ? "OK " : "미설치"} : 플러그인 naver-browser@naver-claude-browser (${sf})`);
+  if (mkPath) console.log(`      마켓플레이스 폴더: ${mkPath}${fs.existsSync(mkPath) ? "" : "  ← 폴더가 없습니다! Claude연결을 다시 실행하세요"}`);
 }
 
 // 2) Claude 앱이 이 도구를 실행한 기록

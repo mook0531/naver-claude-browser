@@ -30,9 +30,9 @@ Claude 구독으로 동작하므로 API 키나 추가 비용이 필요 없습니
 
 1. `실행(Windows).bat`으로 브라우저 앱을 **한 번 실행**합니다 (앱 위치가 기록됩니다).
 2. Claude 앱을 **완전히 종료**하고 `Claude연결(Windows).bat`(Mac은 `Claude연결(Mac).command`)을 실행한 뒤 Claude 앱을 다시 켭니다.
-   - 새 Claude 앱: `~/.claude/skills/naver-browser`에 플러그인이 설치되어 **설정 → 플러그인**에 `naver-browser`가 보입니다.
-   - 또는 **설정 → 플러그인 → 폴더 열기…**에서 이 폴더를 선택해 설치할 수도 있습니다 (`.claude-plugin/marketplace.json`).
-   - 예전 Claude 데스크톱 앱: `claude_desktop_config.json`에도 등록되며, **설정 → 확장 프로그램**에서 `naver-browser.mcpb`를 설치할 수도 있습니다.
+   - 이 폴더를 로컬 마켓플레이스로 등록하고 `naver-browser` 플러그인을 설치합니다(공식 Claude Code CLI 사용). **설정 → 플러그인**에 `naver-browser (로컬 개발)`로 보입니다.
+   - Claude 앱의 **Code / Cowork** 세션에서 쓸 수 있습니다. 폴더를 옮기면 이 파일을 다시 실행하세요.
+   - 예전 Claude 데스크톱 앱(확장 프로그램 메뉴가 있는 버전)은 **설정 → 확장 프로그램**에서 `naver-browser.mcpb`를 설치하세요.
    - 연결 상태는 `연결확인(Windows).bat`으로 볼 수 있습니다.
 3. Claude 앱에서 "네이버에서 ○○ 검색해 줘", "네이버 부동산에서 ○○아파트 매매 매물 정리해 줘"처럼 요청합니다.
    처음에는 도구 사용 허락 창이 뜹니다. **항상 허용**을 누르세요.
