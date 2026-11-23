@@ -11,6 +11,8 @@ rem A half-finished Electron download is not repaired by npm install, so remove 
 if exist "node_modules\electron" rmdir /s /q "node_modules\electron"
 call npm install
 if errorlevel 1 goto fail
+rem npm 12+ skips dependency install scripts, so download the Electron app directly as well.
+if not exist "node_modules\electron\dist\electron.exe" call node node_modules\electron\install.js
 if not exist "node_modules\electron\dist\electron.exe" goto noelectron
 
 :run
@@ -30,7 +32,7 @@ exit /b 1
 echo.
 echo [ERROR] Electron could not be downloaded.
 echo  1. Check your internet connection.
-echo  2. Move this folder OUT of OneDrive, for example to C:\naver-claude-browser
+echo  2. Make sure antivirus or a company firewall is not blocking github.com downloads.
 echo  3. Run this file again.
 pause
 exit /b 1

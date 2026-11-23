@@ -4,7 +4,8 @@
   "description": "네이버를 보면서 페이지 내용을 Claude에게 보내는 데스크톱 브라우저",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "postinstall": "node node_modules/electron/install.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.12.0"
