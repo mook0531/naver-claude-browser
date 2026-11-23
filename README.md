@@ -29,15 +29,16 @@ Claude 데스크톱 앱이 이 브라우저를 직접 조작해 네이버 검색
 Claude 구독으로 동작하므로 API 키나 추가 비용이 필요 없습니다.
 
 1. `실행(Windows).bat`으로 브라우저 앱을 **한 번 실행**합니다 (앱 위치가 기록됩니다).
-2. Claude 앱 **설정 → 확장 프로그램**(Extensions)에서 폴더의 `naver-browser.mcpb` 파일을 설치합니다
-   (파일을 Claude 앱 설정 창에 끌어다 놓거나, `naver-browser.mcpb`를 더블클릭).
-   - 확장 프로그램 메뉴가 없는 버전이면 `Claude연결(Windows).bat`(Mac은 `Claude연결(Mac).command`)을 실행하고
-     Claude 앱을 **완전히 종료**(트레이 아이콘 우클릭 → 종료)한 뒤 다시 실행합니다. 연결 상태는 `연결확인(Windows).bat`으로 볼 수 있습니다.
+2. Claude 앱을 **완전히 종료**하고 `Claude연결(Windows).bat`(Mac은 `Claude연결(Mac).command`)을 실행한 뒤 Claude 앱을 다시 켭니다.
+   - 새 Claude 앱: `~/.claude/skills/naver-browser`에 플러그인이 설치되어 **설정 → 플러그인**에 `naver-browser`가 보입니다.
+   - 또는 **설정 → 플러그인 → 폴더 열기…**에서 이 폴더를 선택해 설치할 수도 있습니다 (`.claude-plugin/marketplace.json`).
+   - 예전 Claude 데스크톱 앱: `claude_desktop_config.json`에도 등록되며, **설정 → 확장 프로그램**에서 `naver-browser.mcpb`를 설치할 수도 있습니다.
+   - 연결 상태는 `연결확인(Windows).bat`으로 볼 수 있습니다.
 3. Claude 앱에서 "네이버에서 ○○ 검색해 줘", "네이버 부동산에서 ○○아파트 매매 매물 정리해 줘"처럼 요청합니다.
    처음에는 도구 사용 허락 창이 뜹니다. **항상 허용**을 누르세요.
 4. 브라우저 앱이 꺼져 있으면 Claude가 자동으로 실행합니다. Claude가 조작하는 동안 오른쪽 패널 위에 주황색 표시가 나옵니다.
 
-**항상 이 브라우저를 쓰게 하려면** Claude 앱의 설정 → 일반 → "Claude가 응답할 때 고려해야 할 개인 선호 사항"에 아래 문장을 넣으세요.
+**항상 이 브라우저를 쓰게 하려면**: 플러그인에 "네이버 정보는 항상 naver-browser 사용" 스킬이 들어 있습니다. 그래도 다른 도구를 쓰면 Claude 앱의 설정 → 일반 → "Claude가 응답할 때 고려해야 할 개인 선호 사항"에 아래 문장을 넣으세요.
 
 > 네이버 검색, 네이버 뉴스·블로그·카페, 네이버 부동산 정보가 필요하면 웹 검색 대신 항상 naver-browser 도구를 사용해.
 
@@ -58,6 +59,7 @@ Claude가 쓸 수 있는 도구: `naver_search`, `navigate`, `get_page_text`, `r
 | `mcp-server.js` | Claude 앱용 MCP 서버 (127.0.0.1, 토큰 인증) |
 | `mcp-bridge.js` | Claude 앱 ↔ 브라우저 연결 다리, 브라우저 자동 실행 |
 | `naver-browser.mcpb`, `extension/` | Claude 앱 확장 프로그램 (다시 만들기: `npm run build:extension`) |
+| `claude-plugin/`, `.claude-plugin/` | 새 Claude 앱용 플러그인(MCP 서버 + 사용 안내 스킬)과 마켓플레이스 |
 | `setup-claude.js` | Claude 앱 설정에 연결 등록 (기존 설정 백업) |
 | `check-claude.js` | 연결 점검 |
 | `preload.js` | 화면에 노출하는 안전한 IPC API |

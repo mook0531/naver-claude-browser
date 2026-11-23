@@ -1,0 +1,16 @@
+{
+  "name": "naver-claude-browser",
+  "owner": {
+    "name": "mook0531"
+  },
+  "plugins": [
+    {
+      "name": "naver-browser",
+      "source": "./claude-plugin",
+      "description": "내 컴퓨터의 '네이버 + Claude 브라우저'를 Claude가 조작해 네이버 검색·네이버 부동산 정보를 가져옵니다."
+    }
+  ],
+  "metadata": {
+    "description": "네이버 + Claude 브라우저를 Claude에 연결하는 플러그인"
+  }
+}

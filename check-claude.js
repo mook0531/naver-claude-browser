@@ -44,6 +44,12 @@ for (const cfg of [path.join(os.homedir(), ".claude.json"), ...claudeDirs().map(
   }
 }
 
+{
+  const pd = path.join(os.homedir(), ".claude", "skills", SERVER_NAME);
+  const ok = fs.existsSync(path.join(pd, ".claude-plugin", "plugin.json")) && fs.existsSync(path.join(pd, ".mcp.json"));
+  console.log(`${ok ? "OK " : "없음"} : 플러그인 ${pd}`);
+}
+
 // 2) Claude 앱이 이 도구를 실행한 기록
 console.log("\n[2] Claude 앱의 연결 기록 (최근)");
 line();

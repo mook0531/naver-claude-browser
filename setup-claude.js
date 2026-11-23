@@ -79,11 +79,25 @@ function update(file, mutate, { create }) {
 
   console.log("\n[등록]");
   let ok = 0;
-  // 1) 새 Claude 앱 / Claude Code: 사용자 설정의 mcpServers
-  if (update(userConfig, (d) => {
-    d.mcpServers = d.mcpServers || {};
-    d.mcpServers[SERVER_NAME] = { type: "stdio", command: process.execPath, args: [bridge], env: {} };
-  }, { create: true })) { console.log(`  등록 완료: ${userConfig}`); ok++; }
+  // 0) 새 Claude 앱: ~/.claude/skills/<이름>/ 에 둔 플러그인을 '로컬 개발' 플러그인으로 자동으로 불러온다
+  const pluginDir = path.join(home, ".claude", "skills", SERVER_NAME);
+  fs.rmSync(pluginDir, { recursive: true, force: true });
+  fs.cpSync(path.join(__dirname, "claude-plugin"), pluginDir, { recursive: true });
+  fs.copyFileSync(bridge, path.join(pluginDir, "server", "index.js")); // 최신 연결 다리
+  // Claude 앱이 node를 PATH에서 못 찾는 경우를 대비해 node 전체 경로를 쓴다
+  const mcpFile = path.join(pluginDir, ".mcp.json");
+  const mcp = JSON.parse(fs.readFileSync(mcpFile, "utf8"));
+  mcp.mcpServers[SERVER_NAME].command = process.execPath;
+  fs.writeFileSync(mcpFile, JSON.stringify(mcp, null, 2) + "\n");
+  console.log(`  플러그인 설치: ${pluginDir}`);
+  ok++;
+  // 1) 예전 버전의 이 스크립트가 사용자 설정에 넣은 항목은 플러그인과 겹치므로 지운다
+  try {
+    if (JSON.parse(fs.readFileSync(userConfig, "utf8")).mcpServers?.[SERVER_NAME]) {
+      update(userConfig, (d) => { delete d.mcpServers[SERVER_NAME]; }, { create: false });
+      console.log(`  중복 항목 정리: ${userConfig}`);
+    }
+  } catch {}
   // 2) 예전 Claude 데스크톱 앱
   for (const f of desktopConfigs()) {
     if (update(f, (d) => {
@@ -97,8 +111,8 @@ function update(file, mutate, { create }) {
 ==============================================================
  등록했습니다. 이제 Claude 앱을 다시 실행하세요.
 
- 1. Claude 앱 설정 → 플러그인 목록에 'naver-browser (로컬 MCP 서버)'가
-    보이면 성공입니다.
+ 1. Claude 앱 설정 → 플러그인 목록에 'naver-browser'가 보이면
+    성공입니다.
  2. 새 대화에서 "naver-browser로 네이버에서 오늘 날씨 검색해 줘" 라고
     해 보세요. 처음 한 번은 도구 사용 허락 창이 뜹니다.
 ==============================================================
