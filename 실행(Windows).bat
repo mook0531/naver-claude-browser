@@ -1,15 +1,30 @@
 @echo off
-chcp 65001 >nul
+rem ASCII only on purpose: cmd.exe misreads UTF-8 Korean text in batch files.
 cd /d "%~dp0"
-where node >nul 2>nul
-if errorlevel 1 (
-  echo Node.js가 설치되어 있지 않습니다. https://nodejs.org 에서 LTS 버전을 설치한 뒤 다시 실행하세요.
-  start https://nodejs.org
-  pause
-  exit /b
-)
-if not exist node_modules (
-  echo 처음 실행이라 필요한 파일을 설치합니다. 몇 분 걸릴 수 있습니다...
-  call npm install
-)
+
+where node >/dev/null 2>nul
+if errorlevel 1 goto nonode
+
+if exist "node_modules\electron\dist\electron.exe" goto run
+echo First run: installing required files. This can take a few minutes...
+call npm install
+if errorlevel 1 goto fail
+
+:run
+echo Starting Naver + Claude Browser...
 call npm start
+if errorlevel 1 goto fail
+exit /b 0
+
+:nonode
+echo [ERROR] Node.js is not installed.
+echo Install the LTS version from https://nodejs.org , then run this file again.
+start "" https://nodejs.org
+pause
+exit /b 1
+
+:fail
+echo.
+echo [ERROR] Something went wrong. Please copy the messages above and send them.
+pause
+exit /b 1
