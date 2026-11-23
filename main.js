@@ -144,7 +144,7 @@ app.on("web-contents-created", (_e, contents) => {
   contents.on("before-input-event", (event, input) => {
     if (input.type !== "keyDown" || !(input.control || input.meta)) return;
     const k = input.key.toLowerCase();
-    const key = k === "t" ? "new" : k === "w" ? "close" : k === "tab" ? (input.shift ? "prev" : "next") : null;
+    const key = k === "l" && input.shift ? "panel" : k === "t" ? "new" : k === "w" ? "close" : k === "tab" ? (input.shift ? "prev" : "next") : null;
     if (key) { event.preventDefault(); toRenderer("tabs:shortcut", key); }
   });
 });

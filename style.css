@@ -17,6 +17,7 @@ button:hover { background: #eef; }
 #views webview { position: absolute; inset: 0; width: 100%; height: 100%; visibility: hidden; }
 #views webview.active { visibility: visible; }
 body.panel-hidden #panel { display: none; }
+#collapse-panel { font-weight: 700; }
 #toggle-panel.on { background: #fbe9e2; border-color: #d97757; }
 #panel { width: 420px; display: flex; flex-direction: column; border-left: 1px solid #ddd; background: #fff; }
 #panel-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid #eee; }

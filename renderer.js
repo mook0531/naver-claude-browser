@@ -161,7 +161,13 @@ function setPanel(show) {
   try { saved = localStorage.getItem("panel"); } catch {}
   setPanel(saved === null ? window.innerWidth >= 1100 : saved === "1");
 }
-$("toggle-panel").onclick = () => setPanel(document.body.classList.contains("panel-hidden"));
+const togglePanel = () => setPanel(document.body.classList.contains("panel-hidden"));
+$("toggle-panel").onclick = togglePanel;
+$("collapse-panel").onclick = () => setPanel(false);
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "l") { e.preventDefault(); togglePanel(); }
+});
+window.api.onTabsShortcut((key) => { if (key === "panel") togglePanel(); });
 
 // ---------- 설정 ----------
 // 고른 모델은 다음 실행 때도 기억
