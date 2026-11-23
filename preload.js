@@ -6,5 +6,6 @@ contextBridge.exposeInMainWorld("api", {
   saveKey: (key) => ipcRenderer.invoke("settings:saveKey", key),
   ask: (requestId, messages, model) => ipcRenderer.invoke("claude:ask", { requestId, messages, model }),
   abort: (requestId) => ipcRenderer.invoke("claude:abort", requestId),
+  onMcpActivity: (cb) => ipcRenderer.on("mcp:activity", (_e, label) => cb(label)),
   onDelta: (cb) => ipcRenderer.on("claude:delta", (_e, data) => cb(data)),
 });

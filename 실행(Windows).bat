@@ -5,7 +5,9 @@ cd /d "%~dp0"
 where node >nul 2>nul
 if errorlevel 1 goto nonode
 
+if not exist "node_modules\@modelcontextprotocol\sdk\package.json" goto install
 if exist "node_modules\electron\dist\electron.exe" goto run
+:install
 echo First run: installing required files. This can take a few minutes...
 rem A half-finished Electron download is not repaired by npm install, so remove it first.
 if exist "node_modules\electron" rmdir /s /q "node_modules\electron"

@@ -46,6 +46,14 @@ async function getPage() {
   return { ...p, body, usingSelection, truncated };
 }
 
+// ---------- Claude 앱(MCP)이 조작 중일 때 표시 ----------
+let mcpTimer = null;
+window.api.onMcpActivity((label) => {
+  clearTimeout(mcpTimer);
+  if (label) { $("mcp-activity").textContent = "🤖 Claude가 조작 중 · " + label; $("mcp-activity").hidden = false; }
+  else mcpTimer = setTimeout(() => { $("mcp-activity").hidden = true; }, 1500);
+});
+
 // ---------- 설정 ----------
 // 고른 모델은 다음 실행 때도 기억
 try { const m = localStorage.getItem("model"); if (m) $("model").value = m; } catch {}

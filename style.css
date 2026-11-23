@@ -10,6 +10,8 @@ button:hover { background: #eef; }
 #panel { width: 420px; display: flex; flex-direction: column; border-left: 1px solid #ddd; background: #fff; }
 #panel-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid #eee; }
 #model { font: inherit; padding: 3px; border: 1px solid #ccd; border-radius: 6px; }
+#mcp-activity { padding: 6px 12px; background: #fff4e5; color: #8a4b00; font-size: 13px; border-bottom: 1px solid #f3d9b1; }
+#mcp-activity[hidden] { display: none; }
 #key-box { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid #eee; }
 #key-box[hidden] { display: none; }
 #key { flex: 1; padding: 5px; }

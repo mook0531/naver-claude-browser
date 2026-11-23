@@ -23,14 +23,42 @@ API 키는 OS 키체인으로 암호화되어 저장되며, 환경변수 `ANTHRO
 - 블로그·카페처럼 본문이 iframe 안에 있는 페이지도 같은 도메인이면 본문까지 읽습니다.
 - 빠른 버튼: 요약 / 표로 정리 / 항목 추출. 대화는 이어지며 `새 대화`로 초기화합니다.
 
+## Claude 앱에서 이 브라우저 사용하기 (MCP)
+
+Claude 데스크톱 앱이 이 브라우저를 직접 조작해 네이버 검색·네이버 부동산 정보를 가져오게 할 수 있습니다.
+Claude 구독으로 동작하므로 API 키나 추가 비용이 필요 없습니다.
+
+1. 폴더에서 `Claude연결(Windows).bat`(Mac은 `Claude연결(Mac).command`)을 더블클릭합니다.
+2. Claude 앱을 **완전히 종료**(트레이 아이콘 우클릭 → 종료)한 뒤 다시 실행합니다.
+3. Claude 앱에서 "네이버에서 ○○ 검색해 줘", "네이버 부동산에서 ○○아파트 매매 매물 정리해 줘"처럼 요청합니다.
+   처음에는 도구 사용 허락 창이 뜹니다. **항상 허용**을 누르세요.
+4. 브라우저 앱이 꺼져 있으면 Claude가 자동으로 실행합니다. Claude가 조작하는 동안 오른쪽 패널 위에 주황색 표시가 나옵니다.
+
+**항상 이 브라우저를 쓰게 하려면** Claude 앱의 설정 → 일반 → "Claude가 응답할 때 고려해야 할 개인 선호 사항"에 아래 문장을 넣으세요.
+
+> 네이버 검색, 네이버 뉴스·블로그·카페, 네이버 부동산 정보가 필요하면 웹 검색 대신 항상 naver-browser 도구를 사용해.
+
+Claude가 쓸 수 있는 도구: `naver_search`, `navigate`, `get_page_text`, `read_page`, `find`, `click`, `type_text`, `press_key`, `scroll`, `scroll_to`, `set_value`, `screenshot`.
+
+**안전장치**
+- 서버는 내 컴퓨터 안(127.0.0.1)에서만 열리고, 앱이 만든 비밀 토큰이 있어야 접속됩니다.
+- http/https 주소만 열 수 있고, 페이지 안의 JavaScript 실행·파일 업로드 기능은 없습니다.
+- 이 브라우저에서 네이버에 로그인해 두면 Claude도 로그인된 상태로 조작하게 됩니다. 로그인하지 않고 쓰는 것을 권장합니다.
+- 네이버는 자동 대량 수집을 약관으로 금지합니다. 개인적으로 필요한 만큼만 조회하세요.
+
 ## 구조
 
 | 파일 | 역할 |
 |---|---|
-| `main.js` | 창 생성, API 키 저장, Claude API 호출(스트리밍) |
+| `main.js` | 창 생성, API 키 저장, Claude API 호출(스트리밍), MCP 서버 시작 |
+| `browser-driver.js` | 브라우저 조작(이동, 읽기, 클릭, 입력, 스크롤, 캡처) |
+| `mcp-server.js` | Claude 앱용 MCP 서버 (127.0.0.1, 토큰 인증) |
+| `mcp-bridge.js` | Claude 앱 ↔ 브라우저 연결 다리, 브라우저 자동 실행 |
+| `setup-claude.js` | Claude 앱 설정에 연결 등록 (기존 설정 백업) |
 | `preload.js` | 화면에 노출하는 안전한 IPC API |
-| `renderer.js` | 브라우저 조작, 페이지 텍스트 추출, 채팅 UI |
+| `renderer.js` | 브라우저 조작 버튼, 페이지 텍스트 추출, 채팅 UI |
 | `index.html`, `style.css` | 화면 |
+| `scripts/install-electron.js` | Electron 설치(보안 정책으로 막히면 대체 방법) |
 
 ## 모델 선택
 

@@ -3,6 +3,8 @@ const { app, BrowserWindow, ipcMain, session, safeStorage } = require("electron"
 const path = require("path");
 const fs = require("fs");
 const Anthropic = require("@anthropic-ai/sdk");
+const driver = require("./browser-driver");
+const { startMcpServer } = require("./mcp-server");
 
 // 선택 가능한 모델 (가격: 입력/출력 100만 토큰당 달러)
 const MODELS = {
@@ -58,6 +60,8 @@ function createWindow() {
 // webview 안의 새 창(target=_blank) 링크는 같은 webview에서 열기
 app.on("web-contents-created", (_e, contents) => {
   if (contents.getType() === "webview") {
+    driver.setWebContents(contents); // Claude(MCP)가 조작할 화면
+
     contents.setWindowOpenHandler(({ url }) => {
       contents.loadURL(url);
       return { action: "deny" };
@@ -124,5 +128,23 @@ ipcMain.handle("claude:abort", (_e, requestId) => {
   running.get(requestId)?.abort();
 });
 
-app.whenReady().then(createWindow);
+// 한 번에 하나의 앱만 실행 (Claude 연결 스크립트가 앱을 또 띄워도 기존 창을 사용)
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win) { if (win.isMinimized()) win.restore(); win.focus(); }
+  });
+  app.whenReady().then(() => {
+    createWindow();
+    // Claude 데스크톱 앱이 이 브라우저를 조작할 수 있게 MCP 서버 시작
+    startMcpServer({
+      userDataDir: app.getPath("userData"),
+      onActivity: (label) => {
+        for (const w of BrowserWindow.getAllWindows()) w.webContents.send("mcp:activity", label);
+      },
+    });
+  });
+}
 app.on("window-all-closed", () => app.quit());
