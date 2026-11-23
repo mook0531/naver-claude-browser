@@ -47,6 +47,10 @@ async function getPage() {
 }
 
 // ---------- 설정 ----------
+// 고른 모델은 다음 실행 때도 기억
+try { const m = localStorage.getItem("model"); if (m) $("model").value = m; } catch {}
+if (!$("model").value) $("model").value = "claude-haiku-5-5";
+$("model").onchange = () => { try { localStorage.setItem("model", $("model").value); } catch {} };
 $("settings").onclick = () => { $("key-box").hidden = !$("key-box").hidden; };
 $("save-key").onclick = async () => {
   if (!$("key").value.trim()) return;
@@ -109,11 +113,11 @@ async function send(question) {
   busy(true);
   setStatus("Claude가 생각 중...");
 
-  const res = await window.api.ask(requestId, history);
+  const res = await window.api.ask(requestId, history, $("model").value);
   if (res.ok) {
     current.el.textContent = res.text;
     history.push({ role: "assistant", content: res.text });
-    setStatus(`완료 · 입력 ${res.usage.input_tokens.toLocaleString()} / 출력 ${res.usage.output_tokens.toLocaleString()} 토큰`);
+    setStatus(`완료 (${$("model").selectedOptions[0].text.split(" ·")[0]}) · 입력 ${res.usage.input_tokens.toLocaleString()} / 출력 ${res.usage.output_tokens.toLocaleString()} 토큰`);
   } else {
     if (!current.el.textContent) current.el.remove();
     addMsg("error", res.error);
