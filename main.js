@@ -52,6 +52,7 @@ function createWindow() {
     width,
     height: wa.height,
     title: "네이버 + Claude 브라우저",
+    icon: path.join(__dirname, "assets", process.platform === "win32" ? "icon.ico" : "icon.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,

@@ -15,6 +15,8 @@
 터미널을 쓰신다면 `npm install` 후 `npm start`로도 실행할 수 있습니다.
 API 키는 OS 키체인으로 암호화되어 저장되며, 환경변수 `ANTHROPIC_API_KEY`가 있으면 그것을 우선 사용합니다.
 
+**바탕화면 아이콘**: `바탕화면아이콘만들기(Windows).bat`을 실행하면 바탕화면과 시작 메뉴에 '네이버 Claude 브라우저' 바로가기가 생깁니다. 다음부터는 아이콘을 더블클릭해서 여세요(까만 창 없이 열림).
+
 ## 사용법
 
 - 주소창: URL을 입력하거나 검색어를 입력하면 네이버 검색으로 이동합니다. `N` 버튼은 네이버 홈.
@@ -71,6 +73,7 @@ Claude도 `list_tabs` · `new_tab` · `switch_tab` · `close_tab`으로 탭을 �
 | `mcp-bridge.js` | Claude 앱 ↔ 브라우저 연결 다리, 브라우저 자동 실행 |
 | `naver-browser.mcpb`, `extension/` | Claude 앱 확장 프로그램 (다시 만들기: `npm run build:extension`) |
 | `claude-plugin/`, `.claude-plugin/` | 새 Claude 앱용 플러그인(MCP 서버 + 사용 안내 스킬)과 마켓플레이스 |
+| `create-shortcut.js`, `assets/` | 바탕화면·시작 메뉴 바로가기와 아이콘 |
 | `setup-claude.js` | Claude 앱 설정에 연결 등록 (기존 설정 백업) |
 | `check-claude.js` | 연결 점검 |
 | `preload.js` | 화면에 노출하는 안전한 IPC API |
