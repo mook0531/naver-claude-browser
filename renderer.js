@@ -92,6 +92,9 @@ function onEnterAfterIme(el, handler, needCtrl = false) {
 }
 
 function goFromAddressBar() {
+  const pick = suggestPick();  // 추천 목록에서 고른 항목이 있으면 그것
+  closeSuggest();
+  if (pick) { window.api.nav("load", pick); return; }
   const v = $("url").value.trim();
   if (!v) return;
   // 주소처럼 보이면 열고(포트·localhost 포함), 아니면 네이버 검색
@@ -100,6 +103,91 @@ function goFromAddressBar() {
     : "https://search.naver.com/search.naver?query=" + encodeURIComponent(v)); // 이동 후 페이지로 커서
 }
 onEnterAfterIme($("url"), goFromAddressBar);
+
+// ---------- 주소창 자동완성 (북마크 + 방문 기록) ----------
+let sgItems = [], sgSel = -1, sgOpen = false, sgReq = 0, composing = false;
+const urlBox = $("url");
+const bareUrl = (u) => String(u).replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/$/, "");
+const looksUrl = (v) => /^https?:\/\//i.test(v) || /^(localhost|[\w-]+(\.[\w-]+)+)(:\d+)?(\/.*)?$/i.test(v);
+
+async function openSuggest() {
+  if (sgOpen) return;
+  sgOpen = true;
+  const shot = await window.api.overlay(true); // 페이지를 그림으로 바꿔 목록이 가려지지 않게
+  if (!sgOpen) { window.api.overlay(false); return; }
+  $("views").style.backgroundImage = shot ? `url("${shot}")` : "";
+  $("suggest").hidden = false;
+}
+function closeSuggest() {
+  if (!sgOpen) return;
+  sgOpen = false; sgItems = []; sgSel = -1;
+  $("suggest").hidden = true;
+  window.api.overlay(false).then(() => { $("views").style.backgroundImage = ""; });
+}
+function suggestPick() {
+  if (!sgOpen || sgSel < 0 || !sgItems[sgSel]) return null;
+  return sgItems[sgSel].url || null; // url 없는 항목(검색/열기)은 주소창 값으로 처리
+}
+function renderSuggest(typed) {
+  const box = $("suggest");
+  box.innerHTML = "";
+  sgItems.forEach((it, i) => {
+    const el = document.createElement("div");
+    el.className = "sg" + (i === sgSel ? " sel" : "");
+    const ic = document.createElement("span"); ic.className = "ic"; ic.textContent = it.icon;
+    const t = document.createElement("span"); t.className = "t"; t.textContent = it.label;
+    el.append(ic, t);
+    if (it.url) { const u = document.createElement("span"); u.className = "u"; u.textContent = bareUrl(it.url); el.append(u); }
+    el.onmousedown = (e) => { e.preventDefault(); sgSel = i; goFromAddressBar(); }; // blur보다 먼저
+    box.appendChild(el);
+  });
+}
+async function updateSuggest(inlineOk) {
+  const typed = urlBox.value.slice(0, urlBox.selectionStart).trim();
+  if (!typed) { closeSuggest(); return; }
+  const req = ++sgReq;
+  const found = await window.api.suggest(typed);
+  if (req !== sgReq || document.activeElement !== urlBox) return; // 더 최근 입력이 있으면 버림
+  sgItems = [
+    looksUrl(typed) ? { icon: "↗", label: `${typed} 열기` } : { icon: "🔍", label: `네이버에서 "${typed}" 검색` },
+    ...found.map((f) => ({ icon: f.type === "bookmark" ? "★" : "🕘", label: f.title, url: f.url })),
+  ];
+  sgSel = -1;
+  // 크롬처럼 주소 앞부분이 맞으면 나머지를 미리 채움 (지우는 중이거나 한글 조합 중에는 하지 않음)
+  const top = found.find((f) => f.prefix);
+  if (inlineOk && top && !composing && urlBox.selectionStart === urlBox.value.length) {
+    const full = bareUrl(top.url);
+    if (full.toLowerCase().startsWith(typed.toLowerCase()) && full.length > typed.length) {
+      urlBox.value = typed + full.slice(typed.length);
+      urlBox.setSelectionRange(typed.length, full.length);
+      sgSel = sgItems.findIndex((it) => it.url === top.url);
+    }
+  }
+  renderSuggest(typed);
+  openSuggest();
+}
+urlBox.addEventListener("compositionstart", () => { composing = true; });
+urlBox.addEventListener("compositionend", () => { composing = false; updateSuggest(false); });
+urlBox.addEventListener("input", (e) => {
+  const inlineOk = e.inputType === "insertText" && !e.isComposing; // 글자를 더할 때만 미리 채움
+  updateSuggest(inlineOk);
+});
+urlBox.addEventListener("keydown", (e) => {
+  if (!sgOpen || e.isComposing) return;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const n = sgItems.length;
+    sgSel = e.key === "ArrowDown" ? (sgSel + 1) % n : (sgSel - 1 + n) % n;
+    const it = sgItems[sgSel];
+    if (it && it.url) urlBox.value = bareUrl(it.url);
+    renderSuggest();
+  } else if (e.key === "Escape") {
+    e.preventDefault(); closeSuggest();
+    const a = activeTab(); urlBox.value = a.url || "";
+  }
+});
+urlBox.addEventListener("blur", () => setTimeout(closeSuggest, 120));
+urlBox.addEventListener("focus", () => urlBox.select());
 // ---------- 북마크 ----------
 let bookmarks = [];
 const normUrl = (u) => String(u || "").replace(/\/$/, "");

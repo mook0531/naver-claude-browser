@@ -28,6 +28,16 @@ button:hover { background: #eef; }
 .bm-import { color: #888; margin-left: auto; }
 .bm-edit { font: inherit; font-size: 13px; padding: 2px 6px; border: 1px solid #d97757; border-radius: 6px; width: 140px; }
 /* 페이지 자리: 실제 페이지(WebContentsView)는 main이 이 위치에 겹쳐 띄운다 */
+#url-wrap { flex: 1; position: relative; display: flex; min-width: 0; }
+#url-wrap #url { flex: 1; min-width: 0; }
+#suggest { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: #fff; border: 1px solid #ccd; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.15); z-index: 50; padding: 4px; }
+#suggest[hidden] { display: none; }
+.sg { display: flex; gap: 10px; align-items: baseline; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.sg.sel, .sg:hover { background: #eef0f3; }
+.sg .ic { width: 18px; text-align: center; flex: none; color: #888; }
+.sg .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sg .u { color: #1a6fd1; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#views { background-size: 100% 100%; background-repeat: no-repeat; }
 #views { flex: 1; min-height: 0; background: #fff; }
 #back:disabled, #forward:disabled { opacity: .35; cursor: default; }
 body.panel-hidden #panel { display: none; }

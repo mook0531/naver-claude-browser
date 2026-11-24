@@ -38,6 +38,8 @@ contextBridge.exposeInMainWorld("api", {
     extract: () => ipcRenderer.invoke("tabs:extract"),
   },
   nav: (op, arg) => ipcRenderer.send("nav", op, arg),
+  suggest: (q) => ipcRenderer.invoke("suggest", q),
+  overlay: (open) => ipcRenderer.invoke("ui:overlay", open),
   openExternal: (url) => ipcRenderer.send("open-external", url),
   naverApi: {
     status: () => ipcRenderer.invoke("naverapi:status"),

@@ -186,6 +186,9 @@ function createTab(info, url = HOME, { activate = true, focus = "page", index } 
   for (const ev of ["page-title-updated", "did-navigate", "did-navigate-in-page", "did-start-loading", "did-stop-loading"]) {
     wc.on(ev, () => pushState(info));
   }
+  // 방문 기록 (주소창 자동완성용)
+  wc.on("did-navigate", (_e, u) => recordVisit(u, ""));
+  wc.on("page-title-updated", (_e, title) => recordVisit(wc.getURL(), title, false));
   // 페이지 안 Ctrl+클릭 등으로 생긴 포커스 이동 시 Claude 대상도 맞춘다
   wc.on("focus", () => { if (info.activeTab === id) setGlobalActive(id); });
   wc.loadURL(url).catch(() => {});
@@ -277,6 +280,73 @@ driver.setTabs({
   switchTo: async (id) => { const info = winOfTab(id); activateTab(info, id); info.win.focus(); setGlobalActive(id); return id; },
   close: async (id) => { closeTab(winOfTab(id), id); return id; },
   openWindow: async (url) => { const info = createWindow(url); info.win.focus(); setGlobalActive(info.activeTab); return info.activeTab; },
+});
+
+// ---------- 방문 기록 (주소창 자동완성) ----------
+// 이 PC의 사용자 데이터 폴더 history.json에만 저장. 최근 5000개까지.
+const histPath = () => path.join(app.getPath("userData"), "history.json");
+let history = null, histTimer = null;
+function loadHistory() {
+  if (history) return history;
+  try { history = JSON.parse(fs.readFileSync(histPath(), "utf8")); } catch { history = {}; }
+  return history;
+}
+function saveHistorySoon() {
+  clearTimeout(histTimer);
+  histTimer = setTimeout(() => {
+    const entries = Object.entries(loadHistory()).sort((a, b) => b[1].last - a[1].last).slice(0, 5000);
+    history = Object.fromEntries(entries);
+    fs.mkdirSync(path.dirname(histPath()), { recursive: true });
+    fs.writeFileSync(histPath(), JSON.stringify(history));
+  }, 1500);
+}
+function recordVisit(url, title, isVisit = true) {
+  if (!/^https?:/i.test(url || "")) return;
+  const h = loadHistory();
+  const e = h[url] || (h[url] = { title: "", visits: 0, last: 0 });
+  if (title) e.title = title.slice(0, 120);
+  if (isVisit) { e.visits++; e.last = Date.now(); }
+  saveHistorySoon();
+}
+// 주소창 추천: 북마크 + 방문 기록에서 글자가 맞는 것 (주소 앞부분이 맞으면 우선)
+const bare = (u) => String(u).replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/$/, "");
+function suggest(q) {
+  q = String(q || "").trim().toLowerCase();
+  if (!q) return [];
+  const seen = new Set(), out = [];
+  const add = (type, title, url, base) => {
+    const key = bare(url);
+    if (seen.has(key)) return;
+    const b = key.toLowerCase(), t = (title || "").toLowerCase();
+    let score = 0;
+    if (b.startsWith(q)) score += 100; else if (b.split(/[./?=&-]/).some((w) => w.startsWith(q))) score += 40; else if (b.includes(q)) score += 20;
+    if (t.includes(q)) score += 30;
+    if (!score) return;
+    seen.add(key);
+    out.push({ type, title: title || key, url, prefix: b.startsWith(q), score: score + base });
+  };
+  for (const b of loadBookmarks()) add("bookmark", b.title, b.url, 60);
+  const now = Date.now();
+  for (const [url, e] of Object.entries(loadHistory())) {
+    const ageDays = (now - e.last) / 86400000;
+    add("history", e.title, url, Math.min(e.visits, 30) * 2 + Math.max(0, 20 - ageDays));
+  }
+  return out.sort((a, b) => b.score - a.score).slice(0, 8);
+}
+ipcMain.handle("suggest", (_e, q) => suggest(q));
+ipcMain.handle("history:clear", () => { history = {}; saveHistorySoon(); return true; });
+// 추천 목록이 열려 있는 동안: 페이지를 그림으로 찍어 보여주고 실제 페이지는 잠깐 숨긴다 (목록이 페이지에 가려지지 않게)
+ipcMain.handle("ui:overlay", async (e, open) => {
+  const info = winOf(e.sender), t = info && tabMap.get(info.activeTab);
+  if (!t) return null;
+  if (open) {
+    let shot = null;
+    try { shot = (await t.wc.capturePage()).toDataURL(); } catch {}
+    t.view.setVisible(false);
+    return shot;
+  }
+  t.view.setVisible(true);
+  return null;
 });
 
 // ---------- 북마크 ----------
@@ -439,6 +509,11 @@ function buildMenu() {
       { label: "이 페이지 북마크", accelerator: "CmdOrCtrl+D", click: shortcut("bookmark") },
       { label: "크롬 북마크 가져오기", click: () => importChromeWithDialog(BrowserWindow.getFocusedWindow()) },
       { label: "네이버 쇼핑 API 설정", click: () => openNaverApiSettings() },
+      { label: "방문 기록 지우기", click: async () => {
+        const w = BrowserWindow.getFocusedWindow();
+        const { response } = await dialog.showMessageBox(w, { type: "question", buttons: ["지우기", "취소"], defaultId: 1, cancelId: 1, message: "방문 기록을 모두 지울까요?", detail: "주소창 자동완성에 쓰이는 방문 기록입니다. 북마크는 지워지지 않습니다.", noLink: true });
+        if (response === 0) { history = {}; saveHistorySoon(); }
+      } },
       { label: "이 페이지를 기본 브라우저(크롬)에서 열기", accelerator: "CmdOrCtrl+Shift+O", click: () => {
         const w = BrowserWindow.getFocusedWindow(); const wc = activeWc(w && wins.get(w.id));
         if (wc && /^https?:/i.test(wc.getURL())) shell.openExternal(wc.getURL());
