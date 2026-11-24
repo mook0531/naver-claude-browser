@@ -5,6 +5,7 @@ const fs = require("fs");
 const Anthropic = require("@anthropic-ai/sdk");
 const driver = require("./browser-driver");
 const { startMcpServer } = require("./mcp-server");
+const naverApi = require("./naver-api");
 
 // 선택 가능한 모델 (가격: 입력/출력 100만 토큰당 달러)
 const MODELS = {
@@ -384,6 +385,36 @@ async function importChromeWithDialog(win) {
 ipcMain.handle("bm:import-chrome", (e) => importChromeWithDialog(BrowserWindow.fromWebContents(e.sender)));
 driver.setBookmarks({ list: loadBookmarks, add: addBookmark });
 
+// ---------- 네이버 쇼핑 API 설정 ----------
+let settingsWin = null;
+function openNaverApiSettings() {
+  if (settingsWin && !settingsWin.isDestroyed()) { settingsWin.focus(); return; }
+  const parent = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+  settingsWin = new BrowserWindow({
+    width: 560, height: 620, parent, modal: false, resizable: false, minimizable: false, autoHideMenuBar: true,
+    title: "네이버 쇼핑 API 설정",
+    webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, nodeIntegration: false },
+  });
+  settingsWin.setMenuBarVisibility(false);
+  settingsWin.loadFile(path.join(__dirname, "settings.html"));
+}
+ipcMain.handle("naverapi:status", () => naverApi.keyStatus());
+ipcMain.handle("naverapi:save", (_e, id, secret) => { naverApi.saveKeys(id, secret); return naverApi.keyStatus(); });
+ipcMain.handle("naverapi:test", async () => {
+  try { const r = await naverApi.shoppingSearch({ query: "노트북", display: 1 }); return { ok: true, total: r.total }; }
+  catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle("naverapi:export", async (e) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    title: "직원용 키 파일 저장", defaultPath: naverApi.SHARED_FILE, filters: [{ name: "JSON", extensions: ["json"] }],
+  });
+  if (canceled || !filePath) return { ok: false };
+  try { naverApi.exportSharedKeyFile(filePath); return { ok: true, filePath }; }
+  catch (err) { return { ok: false, error: err.message }; }
+});
+ipcMain.on("open-external", (_e, url) => { if (/^https:\/\//i.test(url)) shell.openExternal(url); });
+
 // ---------- 단축키 (앱 메뉴) ----------
 // 메뉴 단축키는 페이지 키 입력을 건드리지 않고, 커서가 페이지 안에 있어도 동작한다. 메뉴 막대는 Alt를 누를 때만 보인다.
 function shortcut(key) {
@@ -407,6 +438,7 @@ function buildMenu() {
       { label: "탭 닫기", accelerator: "CmdOrCtrl+W", click: shortcut("close") },
       { label: "이 페이지 북마크", accelerator: "CmdOrCtrl+D", click: shortcut("bookmark") },
       { label: "크롬 북마크 가져오기", click: () => importChromeWithDialog(BrowserWindow.getFocusedWindow()) },
+      { label: "네이버 쇼핑 API 설정", click: () => openNaverApiSettings() },
       { label: "이 페이지를 기본 브라우저(크롬)에서 열기", accelerator: "CmdOrCtrl+Shift+O", click: () => {
         const w = BrowserWindow.getFocusedWindow(); const wc = activeWc(w && wins.get(w.id));
         if (wc && /^https?:/i.test(wc.getURL())) shell.openExternal(wc.getURL());
@@ -495,6 +527,8 @@ if (!app.requestSingleInstanceLock()) {
   // 이미 켜져 있을 때 아이콘을 또 누르면 새 창을 연다
   app.on("second-instance", () => createWindow());
   app.whenReady().then(() => {
+    // 직원 PC: 앱 폴더에 넣어 둔 회사 공용 키 파일(naver-api-key.json)이 있으면 등록
+    if (naverApi.importSharedKeyFile(__dirname)) console.log("네이버 쇼핑 API 키를 등록했습니다.");
     buildMenu();
     createWindow();
     // Claude 데스크톱 앱이 이 브라우저를 조작할 수 있게 MCP 서버 시작

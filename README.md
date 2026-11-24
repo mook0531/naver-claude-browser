@@ -63,6 +63,9 @@ Claude가 쓸 수 있는 도구: `naver_search`, `navigate`, `get_page_text`, `r
 
 **북마크**: 주소창 옆 **☆**(Ctrl+D)로 지금 페이지를 북마크하고, 주소창 아래 북마크 막대에서 엽니다(Ctrl+클릭·가운데 클릭: 새 탭, Shift+클릭: 새 창, 우클릭: 이름 바꾸기·삭제). 모든 창이 같이 쓰며 `bookmarks.json`(사용자 데이터 폴더)에 저장됩니다. Claude도 `list_bookmarks` · `add_bookmark`로 씁니다. 북마크 막대 끝의 **⤓ 크롬 북마크 가져오기**(또는 Alt → 파일 메뉴)로 크롬의 모든 프로필 북마크를 중복 없이 가져옵니다.
 
+**네이버 쇼핑 (공식 API)**: Claude는 쇼핑 가격·최저가를 네이버 공식 검색 API(`naver_shopping_search`)로 가져옵니다. 처음 한 번 Alt → 파일 → **네이버 쇼핑 API 설정**에서 [developers.naver.com](https://developers.naver.com)의 Client ID/Secret을 넣으세요(회사 아이디로 만든 키 하나를 함께 씀, 하루 25,000회).
+직원 PC에는 설정 창의 **직원용 키 파일 만들기**로 만든 `naver-api-key.json`을 브라우저 폴더에 넣고 브라우저를 켜면 자동 등록되고 파일은 지워집니다. 이 파일은 비밀 키가 들어 있으므로 사내로만 전달하세요(`.gitignore`에 포함).
+
 **크롬에서 열기**: 지금 페이지를 기본 브라우저(크롬)에서 열려면 Ctrl+Shift+O. 네이버 쇼핑처럼 이 브라우저의 접속을 제한하는 페이지에 쓰세요.
 
 **단축키**: Ctrl+T 새 탭, Ctrl+W 탭 닫기, Ctrl+N 새 창, Ctrl+Tab 탭 전환, Ctrl+D 북마크, Ctrl+Shift+L 대화창, F5 새로고침. 메뉴 막대는 Alt를 누르면 보입니다.

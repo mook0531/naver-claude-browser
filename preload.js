@@ -38,6 +38,13 @@ contextBridge.exposeInMainWorld("api", {
     extract: () => ipcRenderer.invoke("tabs:extract"),
   },
   nav: (op, arg) => ipcRenderer.send("nav", op, arg),
+  openExternal: (url) => ipcRenderer.send("open-external", url),
+  naverApi: {
+    status: () => ipcRenderer.invoke("naverapi:status"),
+    save: (id, secret) => ipcRenderer.invoke("naverapi:save", id, secret),
+    test: () => ipcRenderer.invoke("naverapi:test"),
+    exportKeyFile: () => ipcRenderer.invoke("naverapi:export"),
+  },
   newWindow: () => ipcRenderer.send("win:new"),
   onFocusAddress: (cb) => ipcRenderer.on("ui:focus-address", () => cb()),
   onTabsShortcut: (cb) => ipcRenderer.on("tabs:shortcut", (_e, key) => cb(key)),

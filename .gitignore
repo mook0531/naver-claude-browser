@@ -1,1 +1,4 @@
 node_modules/
+
+# 네이버 API 공용 키 파일 (비밀 키 포함, 절대 올리지 않음)
+naver-api-key.json

@@ -19,6 +19,12 @@ $("save").onclick = async () => {
   } catch (e) { say(e.message, "err"); }
 };
 
+$("export").onclick = async () => {
+  const r = await window.api.naverApi.exportKeyFile();
+  if (r.ok) say(`저장했습니다: ${r.filePath}`, "ok");
+  else if (r.error) say(r.error, "err");
+};
+
 $("test").onclick = async () => {
   say("확인 중…");
   const r = await window.api.naverApi.test();

@@ -29,6 +29,27 @@ function saveKeys(id, secret) {
   }), { mode: 0o600 });
 }
 
+// 직원 PC 배포용: 앱 폴더에 naver-api-key.json({ id, secret })이 있으면 가져와 암호화 저장하고 파일은 지운다
+const SHARED_FILE = "naver-api-key.json";
+function importSharedKeyFile(appDir) {
+  const f = path.join(appDir, SHARED_FILE);
+  if (!fs.existsSync(f)) return false;
+  try {
+    const k = JSON.parse(fs.readFileSync(f, "utf8"));
+    saveKeys(k.id, k.secret);
+    fs.rmSync(f, { force: true });
+    return true;
+  } catch (e) {
+    console.error("네이버 API 키 파일을 읽지 못했습니다:", e.message);
+    return false;
+  }
+}
+function exportSharedKeyFile(file) {
+  const k = loadKeys();
+  if (!k) throw new Error("먼저 키를 저장하세요.");
+  fs.writeFileSync(file, JSON.stringify({ id: k.id, secret: k.secret }, null, 2));
+}
+
 const keyStatus = () => { const k = loadKeys(); return { configured: !!k, id: k ? k.id : "" }; };
 
 const strip = (s) => String(s || "").replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
@@ -69,9 +90,9 @@ async function shoppingSearch({ query, sort = "sim", display = 20, start = 1, ex
       title: strip(it.title),
       lprice: Number(it.lprice) || 0,
       hprice: Number(it.hprice) || 0,
-      mall: it.mallName || "",
-      brand: it.brand || "",
-      maker: it.maker || "",
+      mall: strip(it.mallName),
+      brand: strip(it.brand),
+      maker: strip(it.maker),
       category: [it.category1, it.category2, it.category3, it.category4].filter(Boolean).join(" > "),
       link: it.link || "",
       productId: it.productId || "",
@@ -95,4 +116,4 @@ function formatShopping(query, r, sort) {
   ].join("\n");
 }
 
-module.exports = { loadKeys, saveKeys, keyStatus, shoppingSearch, formatShopping };
+module.exports = { loadKeys, saveKeys, keyStatus, shoppingSearch, formatShopping, importSharedKeyFile, exportSharedKeyFile, SHARED_FILE };

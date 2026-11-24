@@ -34,10 +34,13 @@ button.primary { background: #d97757; border-color: #d97757; color: #fff; }
   <label>Client Secret <input id="secret" type="password" autocomplete="off" placeholder="저장된 값은 보이지 않습니다. 바꿀 때만 입력"></label>
   <div id="msg"></div>
   <div class="row">
+    <button id="export" title="직원 PC의 브라우저 폴더에 넣으면 키가 자동 등록됩니다">직원용 키 파일 만들기</button>
     <button id="test">연결 테스트</button>
     <button id="save" class="primary">저장</button>
   </div>
-  <p class="note">Secret은 이 컴퓨터에 암호화해서 저장됩니다. 하루 호출 한도는 25,000회입니다.</p>
+  <p class="note">Secret은 이 컴퓨터에 암호화해서 저장됩니다. 하루 호출 한도는 25,000회이며, 같은 키를 쓰는 모든 직원이 함께 씁니다.<br>
+  <b>직원용 키 파일</b>은 직원 PC의 브라우저 폴더(<code>C:\naver-claude-browser</code>)에 넣고 브라우저를 켜면 자동 등록되고 파일은 지워집니다.
+  이 파일에는 비밀 키가 그대로 들어 있으니 사내 메신저·메일로만 전달하고, 외부에 올리지 마세요.</p>
 </main>
 <script src="settings.js"></script>
 </body>
