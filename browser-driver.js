@@ -11,6 +11,11 @@ const ready = () => {
   if (!wc || wc.isDestroyed()) throw new Error("브라우저 창이 열려 있지 않습니다. 네이버 + Claude 브라우저 앱을 실행하세요.");
   return wc;
 };
+// 앱이 막 켜졌을 때는 첫 탭이 준비될 때까지 잠깐 기다린다 (최대 15초)
+async function waitReady() {
+  for (let i = 0; i < 150 && (!wc || wc.isDestroyed()); i++) await sleep(100);
+  return ready();
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -33,7 +38,9 @@ function cap(text, label = "페이지") {
 
 const where = () => {
   const n = tabsApi ? tabsApi.list().length : 1;
-  return `현재 페이지 [${activeId || "tab"}${n > 1 ? `, 탭 ${n}개 열림` : ""}]: ${ready().getTitle()} — ${ready().getURL()}`;
+  const w = tabsApi ? tabsApi.windowCount() : 1;
+  const winTag = w > 1 && tabsApi ? ` · 창 ${tabsApi.windowNoOf(activeId)}` : "";
+  return `현재 페이지 [${activeId || "tab"}${winTag}${n > 1 ? `, 탭 ${n}개${w > 1 ? `·창 ${w}개` : ""} 열림` : ""}]: ${ready().getTitle()} — ${ready().getURL()}`;
 };
 
 // ---------- 페이지 안에서 실행되는 도우미 ----------
@@ -312,8 +319,25 @@ async function formInput(ref, value) {
 
 // ---------- 탭 ----------
 const needTabs = () => { if (!tabsApi) throw new Error("탭 기능을 쓸 수 없습니다."); return tabsApi; };
-const fmtTabs = (list) => list.map((t) => `${t.active ? "▶" : " "} ${t.tab_id}: ${t.title || "(제목 없음)"} — ${t.url}`).join("\n");
-const listTabs = async () => `열린 탭 ${needTabs().list().length}개 (▶ = 지금 보고 있는 탭)\n${fmtTabs(needTabs().list())}`;
+function fmtTabs(list) {
+  const byWin = new Map();
+  for (const t of list) { if (!byWin.has(t.window)) byWin.set(t.window, []); byWin.get(t.window).push(t); }
+  const many = byWin.size > 1;
+  return [...byWin.entries()].sort((a, b) => a[0] - b[0]).map(([w, ts]) =>
+    (many ? `[창 ${w}]\n` : "") + ts.map((t) => `${t.active ? "▶" : t.shown && many ? "·" : " "} ${t.tab_id}: ${t.title || "(제목 없음)"} — ${t.url}`).join("\n")
+  ).join("\n");
+}
+const listTabs = async () => {
+  const list = needTabs().list(), w = needTabs().windowCount();
+  return `열린 탭 ${list.length}개${w > 1 ? ` (창 ${w}개)` : ""} — ▶ = Claude가 지금 조작하는 탭${w > 1 ? ", · = 다른 창에서 화면에 보이는 탭" : ""}\n${fmtTabs(list)}`;
+};
+async function newWindow(url) {
+  if (url) { if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) url = "https://" + url; if (!/^https?:/i.test(url)) throw new Error("http/https 주소만 열 수 있습니다."); }
+  const id = await needTabs().openWindow(url);
+  for (let i = 0; i < 50 && activeId !== id; i++) await sleep(100);
+  await settle(30000);
+  return `새 창을 열었습니다 (${id}). ${where()}`;
+}
 async function newTab(url) {
   if (url) { if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) url = "https://" + url; if (!/^https?:/i.test(url)) throw new Error("http/https 주소만 열 수 있습니다."); }
   const id = await needTabs().open(url);
@@ -347,6 +371,6 @@ async function screenshot(region) {
 }
 
 module.exports = {
-  setActive, setTabs, listTabs, newTab, switchTab, closeTab, navigate, naverSearch, getPageText, readPage, find, click,
+  setActive, setTabs, waitReady, listTabs, newTab, newWindow, switchTab, closeTab, navigate, naverSearch, getPageText, readPage, find, click,
   typeText, pressKey, scroll, scrollTo, formInput, screenshot, where, setConfirm,
 };

@@ -2,15 +2,18 @@
 const $ = (id) => document.getElementById(id);
 const MAX_CHARS = 200000; // 한 번에 보낼 페이지 텍스트 상한
 const HOME = "https://www.naver.com";
+const params = new URLSearchParams(location.search);
+const WIN_NO = params.get("win") || "1";
+const BASE_TITLE = "네이버 + Claude 브라우저" + (WIN_NO !== "1" ? ` · 창 ${WIN_NO}` : "");
+document.title = BASE_TITLE;
 
 // ---------- 탭 ----------
 const tabs = new Map(); // id -> { id, view, el }
 let activeId = null;
-let seq = 0;
 const view = () => tabs.get(activeId).view; // 지금 보고 있는 탭의 webview
 
 function createTab(url = HOME, activate = true) {
-  const id = "tab-" + (++seq);
+  const id = window.api.allocTabId(); // 모든 창을 통틀어 겹치지 않는 번호
   const wv = document.createElement("webview");
   wv.setAttribute("allowpopups", "");
   wv.src = "about:blank"; // 빈 페이지로 먼저 붙여 바로 등록한 뒤 실제 주소를 연다
@@ -63,7 +66,7 @@ function closeTab(id) {
   tab.el.remove();
   tabs.delete(id);
   window.api.tabClosed(id);
-  if (!tabs.size) createTab(HOME); // 마지막 탭을 닫으면 새 탭
+  if (!tabs.size) { window.api.closeWindow(); return; } // 마지막 탭을 닫으면 이 창을 닫는다
   else if (activeId === id) activateTab(order[i + 1] || order[i - 1]);
 }
 
@@ -73,6 +76,7 @@ function cycleTab(step) {
 }
 
 $("new-tab").onclick = () => createTab(HOME);
+$("new-window").onclick = () => window.api.newWindow();
 window.api.onTabsOpen(({ url, activate }) => createTab(url, activate));
 window.api.onTabsShortcut((key) => {
   if (key === "new") createTab(HOME);
@@ -84,6 +88,7 @@ document.addEventListener("keydown", (e) => {
   if (!e.ctrlKey && !e.metaKey) return;
   const k = e.key.toLowerCase();
   if (k === "t") { e.preventDefault(); createTab(HOME); }
+  else if (k === "n") { e.preventDefault(); window.api.newWindow(); }
   else if (k === "w") { e.preventDefault(); closeTab(activeId); }
   else if (k === "tab") { e.preventDefault(); cycleTab(e.shiftKey ? -1 : 1); }
 });
@@ -94,7 +99,13 @@ window.api.onTabsCommand(async ({ reqId, op, args }) => {
     let result = null;
     if (op === "new") { const t = createTab(args.url || HOME, true); await t.registered; result = t.id; }
     else if (op === "switch") { if (!tabs.has(args.id)) throw new Error(args.id + " 탭이 없습니다."); activateTab(args.id); result = args.id; }
-    else if (op === "close") { if (!tabs.has(args.id)) throw new Error(args.id + " 탭이 없습니다."); closeTab(args.id); result = activeId; }
+    else if (op === "close") {
+      if (!tabs.has(args.id)) throw new Error(args.id + " 탭이 없습니다.");
+      // 마지막 탭이면 창이 닫히므로 먼저 답하고 닫는다
+      window.api.tabsCommandDone(reqId, { ok: true, result: tabs.size === 1 ? "window-closed" : activeId });
+      closeTab(args.id);
+      return;
+    }
     window.api.tabsCommandDone(reqId, { ok: true, result });
   } catch (e) {
     window.api.tabsCommandDone(reqId, { ok: false, error: e.message });
@@ -114,7 +125,7 @@ $("url").addEventListener("keydown", (e) => {
   view().loadURL(looksLikeUrl ? (/^https?:/i.test(v) ? v : "https://" + v)
     : "https://search.naver.com/search.naver?query=" + encodeURIComponent(v));
 });
-createTab(HOME);
+createTab(params.get("url") || HOME); // 새 창이 주소를 받아 열렸으면 그 주소로
 
 // 페이지에서 텍스트 추출 (블로그·카페처럼 iframe 안에 본문이 있는 경우도 포함)
 const EXTRACT = `(() => {
@@ -147,7 +158,7 @@ let mcpTimer = null;
 window.api.onMcpActivity((label) => {
   clearTimeout(mcpTimer);
   if (label) { $("mcp-activity").textContent = "🤖 Claude가 조작 중 · " + label; $("mcp-activity").hidden = false; document.title = "🤖 " + label; }
-  else mcpTimer = setTimeout(() => { $("mcp-activity").hidden = true; document.title = "네이버 + Claude 브라우저"; }, 1500);
+  else mcpTimer = setTimeout(() => { $("mcp-activity").hidden = true; document.title = BASE_TITLE; }, 1500);
 });
 
 // ---------- 앱 안의 Claude 패널 접기/펴기 (창이 좁으면 기본으로 접힘) ----------

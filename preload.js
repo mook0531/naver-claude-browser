@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld("api", {
   ask: (requestId, messages, model) => ipcRenderer.invoke("claude:ask", { requestId, messages, model }),
   abort: (requestId) => ipcRenderer.invoke("claude:abort", requestId),
   // 탭
+  allocTabId: () => ipcRenderer.sendSync("tab:alloc"),
+  newWindow: () => ipcRenderer.send("win:new"),
+  closeWindow: () => ipcRenderer.send("win:close"),
   registerTab: (id, webContentsId) => ipcRenderer.send("tab:register", id, webContentsId),
   tabActivated: (id) => ipcRenderer.send("tab:activated", id),
   tabClosed: (id) => ipcRenderer.send("tab:closed", id),
