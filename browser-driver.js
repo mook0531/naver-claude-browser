@@ -199,7 +199,11 @@ async function navigate(url) {
     if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) url = "https://" + url;
     if (!/^https?:/i.test(url)) throw new Error("http/https 주소만 열 수 있습니다.");
     let failed = null;
-    const onFail = (_e, code, desc, failedUrl, isMainFrame) => { if (isMainFrame && code !== -3) failed = `${desc} (${failedUrl})`; };
+    // 이번에 연 주소의 실패만 센다 (탭에서 이전에 로딩 중이던 다른 페이지의 실패는 무시)
+    const norm = (u) => String(u).replace(/[#?].*$/, "").replace(/\/$/, "").toLowerCase();
+    const onFail = (_e, code, desc, failedUrl, isMainFrame) => {
+      if (isMainFrame && code !== -3 && norm(failedUrl) === norm(url)) failed = `${desc} (${failedUrl})`;
+    };
     c.on("did-fail-load", onFail);
     c.loadURL(url).catch(() => {}); // 리다이렉트 등으로 생기는 중단(-3)은 무시하고 아래에서 결과 확인
     await settle(30000);

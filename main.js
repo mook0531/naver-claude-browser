@@ -81,7 +81,20 @@ function createWindow(url) {
 }
 
 // Claude가 저장·삭제·결제 같은 버튼을 누르기 전에 사용자에게 직접 묻는 창 (2분 안에 답이 없으면 거부)
+// 확인 창 사용 여부 (기본: 끔). 브라우저 탭 바의 "확인 창" 버튼으로 바꾸며, 설정은 사용자 데이터 폴더에 저장
+const prefsPath = () => path.join(app.getPath("userData"), "prefs.json");
+function loadPrefs() { try { return JSON.parse(fs.readFileSync(prefsPath(), "utf8")); } catch { return {}; } }
+function savePrefs(p) { fs.mkdirSync(path.dirname(prefsPath()), { recursive: true }); fs.writeFileSync(prefsPath(), JSON.stringify(p)); }
+const confirmOn = () => loadPrefs().confirm === true;
+ipcMain.handle("prefs:confirm:get", () => confirmOn());
+ipcMain.handle("prefs:confirm:set", (_e, on) => {
+  savePrefs({ ...loadPrefs(), confirm: !!on });
+  for (const w of BrowserWindow.getAllWindows()) w.webContents.send("prefs:confirm", !!on); // 모든 창의 버튼 표시 맞추기
+  return !!on;
+});
+
 driver.setConfirm(async (message, detail) => {
+  if (!confirmOn()) return true; // 확인 창 끔: 바로 진행
   const t = tabMap.get(globalActive);
   const win = (t && wins.get(t.winId) && wins.get(t.winId).win) || BrowserWindow.getAllWindows()[0];
   if (!win) return false;

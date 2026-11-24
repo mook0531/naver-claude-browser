@@ -77,6 +77,12 @@ function cycleTab(step) {
 
 $("new-tab").onclick = () => createTab(HOME);
 $("new-window").onclick = () => window.api.newWindow();
+
+// Claude 작업 확인 창 켜기/끄기 (모든 창에 같이 적용)
+function showConfirm(on) { $("confirm-toggle").textContent = "확인 창: " + (on ? "켬" : "끔"); $("confirm-toggle").classList.toggle("on", on); }
+window.api.getConfirm().then(showConfirm);
+window.api.onConfirmChanged(showConfirm);
+$("confirm-toggle").onclick = async () => showConfirm(await window.api.setConfirm(!$("confirm-toggle").classList.contains("on")));
 window.api.onTabsOpen(({ url, activate }) => createTab(url, activate));
 window.api.onTabsShortcut((key) => {
   if (key === "new") createTab(HOME);

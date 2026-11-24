@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld("api", {
   ask: (requestId, messages, model) => ipcRenderer.invoke("claude:ask", { requestId, messages, model }),
   abort: (requestId) => ipcRenderer.invoke("claude:abort", requestId),
   // 탭
+  getConfirm: () => ipcRenderer.invoke("prefs:confirm:get"),
+  setConfirm: (on) => ipcRenderer.invoke("prefs:confirm:set", on),
+  onConfirmChanged: (cb) => ipcRenderer.on("prefs:confirm", (_e, on) => cb(on)),
   allocTabId: () => ipcRenderer.sendSync("tab:alloc"),
   newWindow: () => ipcRenderer.send("win:new"),
   closeWindow: () => ipcRenderer.send("win:close"),

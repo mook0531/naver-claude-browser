@@ -14,6 +14,9 @@ button:hover { background: #eef; }
 .tab .close:hover { background: #ccd; }
 #tabbar .spacer { flex: 1; }
 #new-window { border: 0; background: none; font-size: 13px; color: #555; padding: 2px 8px; margin-bottom: 4px; white-space: nowrap; }
+#confirm-toggle { border: 0; background: none; font-size: 13px; color: #555; padding: 2px 8px; margin-bottom: 4px; white-space: nowrap; }
+#confirm-toggle:hover { background: #dcdfe3; }
+#confirm-toggle.on { color: #9a5b00; font-weight: 700; }
 #new-window:hover { background: #dcdfe3; }
 #new-tab { border: 0; background: none; font-size: 18px; padding: 2px 10px; margin-bottom: 3px; }
 #views { flex: 1; position: relative; }
