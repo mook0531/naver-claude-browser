@@ -1,5 +1,5 @@
 // 메인 프로세스: 창 생성, API 키 보관, Claude 호출
-const { app, BrowserWindow, ipcMain, session, safeStorage, screen, dialog, webContents, Menu } = require("electron");
+const { app, BrowserWindow, WebContentsView, ipcMain, session, safeStorage, screen, dialog, Menu, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const Anthropic = require("@anthropic-ai/sdk");
@@ -38,9 +38,11 @@ function saveApiKey(key) {
 }
 
 // ---------- 창 (여러 개) ----------
-// 창마다 탭이 있고, 탭 번호(tab-N)는 모든 창을 통틀어 하나씩만 쓴다.
-const wins = new Map(); // BrowserWindow.id -> { win, no, activeTab }
+// 창 = 위쪽 화면(탭 막대·주소창·북마크·대화창, index.html) + 그 아래 페이지 자리에 붙인 탭별 WebContentsView.
+// (예전의 <webview> 방식은 Windows 한글 입력기와 충돌해 페이지 안 입력창에서 한글이 안 되는 문제가 있었다)
+const wins = new Map(); // BrowserWindow.id -> { win, no, activeTab, order: [tabId], bounds }
 let winSeq = 0;
+const HOME = "https://www.naver.com/";
 
 function createWindow(url) {
   // 일반 크롬처럼 보이도록 UA에서 Electron 표시 제거 (네이버가 PC 화면을 주도록)
@@ -63,21 +65,24 @@ function createWindow(url) {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      webviewTag: true,
     },
   });
-  const info = { win, no: ++winSeq, activeTab: null };
+  // 페이지 자리: 화면이 실제 위치를 알려주기 전까지 쓸 대략적인 값
+  const [cw, ch] = win.getContentSize();
+  const info = { win, no: ++winSeq, activeTab: null, order: [], bounds: { x: 0, y: 112, width: cw, height: Math.max(100, ch - 112) } };
   wins.set(win.id, info);
   win.on("focus", () => { if (info.activeTab) setGlobalActive(info.activeTab); });
   win.on("closed", () => {
     wins.delete(win.id);
-    for (const [id, t] of tabMap) if (t.winId === win.id) tabMap.delete(id);
+    for (const id of info.order) { const t = tabMap.get(id); if (t && !t.wc.isDestroyed()) t.wc.close(); tabMap.delete(id); }
     if (!tabMap.has(globalActive)) {
-      const next = (BrowserWindow.getFocusedWindow() && wins.get(BrowserWindow.getFocusedWindow().id)) || [...wins.values()][0];
+      const f = BrowserWindow.getFocusedWindow();
+      const next = (f && wins.get(f.id)) || [...wins.values()][0];
       if (next && next.activeTab) setGlobalActive(next.activeTab);
     }
   });
-  win.loadFile(path.join(__dirname, "index.html"), { query: url ? { url, win: String(info.no) } : { win: String(info.no) } });
+  win.loadFile(path.join(__dirname, "index.html"), { query: { win: String(info.no) } });
+  createTab(info, url || HOME, { activate: true, focus: "page" }); // 첫 탭은 바로 만든다
   return info;
 }
 
@@ -125,8 +130,7 @@ driver.setConfirm(async (message, detail) => {
 });
 
 // ---------- 탭 ----------
-// 화면(renderer)이 탭을 만들고, 여기서는 탭 id ↔ 페이지(webContents)·창을 기억한다.
-const tabMap = new Map(); // tabId -> { wc, winId }
+const tabMap = new Map(); // tabId -> { view, wc, winId }
 let tabSeq = 0;
 let globalActive = null;   // Claude가 조작하는 탭 = 사용자가 마지막으로 본 탭
 const winOf = (sender) => { const w = BrowserWindow.fromWebContents(sender); return w && wins.get(w.id); };
@@ -138,39 +142,127 @@ function setGlobalActive(id) {
 const sendTo = (info, channel, data) => { if (info && !info.win.isDestroyed()) info.win.webContents.send(channel, data); };
 const allWins = () => [...wins.values()].filter((w) => !w.win.isDestroyed());
 
-ipcMain.on("tab:alloc", (e) => { e.returnValue = "tab-" + (++tabSeq); });
-ipcMain.on("tab:register", (e, id, wcId) => {
-  const wc = webContents.fromId(wcId);
-  const info = winOf(e.sender);
-  if (!wc || !info) return;
-  tabMap.set(id, { wc, winId: info.win.id });
-  if (info.activeTab === id && (globalActive === null || globalActive === id || info.win.isFocused() || !tabMap.has(globalActive))) setGlobalActive(id);
-});
-ipcMain.on("tab:activated", (e, id) => {
-  const info = winOf(e.sender);
-  if (!info) return;
-  info.activeTab = id;
-  // 이 창을 보고 있거나(포커스), Claude가 이 창에서 일하던 중이면 Claude의 대상 탭도 바꾼다
-  const cur = tabMap.get(globalActive);
-  if (info.win.isFocused() || !cur || cur.winId === info.win.id) { globalActive = id; if (tabMap.has(id)) setGlobalActive(id); }
-});
-ipcMain.on("tab:closed", (_e, id) => { tabMap.delete(id); });
-ipcMain.on("win:new", () => createWindow());
-ipcMain.on("win:close", (e) => { const info = winOf(e.sender); if (info) info.win.close(); });
-
-// Claude(MCP)의 탭 명령을 해당 창의 화면에 전달하고 결과를 기다린다
-let cmdSeq = 0;
-const pending = new Map();
-ipcMain.on("tabs:cmd-done", (_e, reqId, result) => { const p = pending.get(reqId); if (p) { pending.delete(reqId); p(result); } });
-function tabCommand(info, op, args = {}) {
-  return new Promise((resolve, reject) => {
-    if (!info) return reject(new Error("열린 브라우저 창이 없습니다."));
-    const reqId = ++cmdSeq;
-    const timer = setTimeout(() => { pending.delete(reqId); reject(new Error("탭 명령 시간 초과")); }, 30000);
-    pending.set(reqId, (r) => { clearTimeout(timer); r.ok ? resolve(r.result) : reject(new Error(r.error)); });
-    sendTo(info, "tabs:cmd", { reqId, op, args });
-  });
+// 탭 막대를 그릴 정보를 화면에 보낸다
+function tabState(info) {
+  return {
+    activeId: info.activeTab,
+    tabs: info.order.map((id) => {
+      const t = tabMap.get(id);
+      if (!t || t.wc.isDestroyed()) return { id, title: "", url: "" };
+      return { id, title: t.wc.getTitle(), url: t.wc.getURL(), loading: t.wc.isLoading(),
+        canGoBack: t.wc.navigationHistory.canGoBack(), canGoForward: t.wc.navigationHistory.canGoForward() };
+    }),
+  };
 }
+const pushState = (info) => sendTo(info, "tabs:state", tabState(info));
+
+// 페이지를 화면의 페이지 자리에 맞춘다 (화면 배율 반영)
+function layout(info) {
+  const t = tabMap.get(info.activeTab);
+  if (!t) return;
+  const z = info.win.webContents.getZoomFactor();
+  const b = info.bounds;
+  t.view.setBounds({ x: Math.round(b.x * z), y: Math.round(b.y * z), width: Math.max(0, Math.round(b.width * z)), height: Math.max(0, Math.round(b.height * z)) });
+}
+
+function createTab(info, url = HOME, { activate = true, focus = "page", index } = {}) {
+  const id = "tab-" + (++tabSeq);
+  const view = new WebContentsView({ webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true } });
+  const wc = view.webContents;
+  tabMap.set(id, { view, wc, winId: info.win.id });
+  if (typeof index === "number") info.order.splice(index, 0, id); else info.order.push(id);
+  view.setVisible(false);
+  info.win.contentView.addChildView(view);
+
+  // 새 창으로 여는 링크(target=_blank, Ctrl+클릭)는 같은 창의 새 탭으로, Shift+클릭은 새 창으로
+  wc.setWindowOpenHandler(({ url: u, disposition }) => {
+    if (/^https?:/i.test(u)) {
+      if (disposition === "new-window") createWindow(u);
+      else createTab(info, u, { activate: disposition !== "background-tab", index: info.order.indexOf(id) + 1 });
+    }
+    return { action: "deny" };
+  });
+  for (const ev of ["page-title-updated", "did-navigate", "did-navigate-in-page", "did-start-loading", "did-stop-loading"]) {
+    wc.on(ev, () => pushState(info));
+  }
+  // 페이지 안 Ctrl+클릭 등으로 생긴 포커스 이동 시 Claude 대상도 맞춘다
+  wc.on("focus", () => { if (info.activeTab === id) setGlobalActive(id); });
+  wc.loadURL(url).catch(() => {});
+
+  if (activate || !info.activeTab) activateTab(info, id, { focus });
+  else pushState(info);
+  return id;
+}
+
+function activateTab(info, id, { focus = "page" } = {}) {
+  if (!tabMap.has(id)) return;
+  info.activeTab = id;
+  for (const tid of info.order) { const t = tabMap.get(tid); if (t) t.view.setVisible(tid === id); }
+  layout(info);
+  // 이 창을 보고 있거나, Claude가 이 창에서 일하던 중이면 Claude의 대상 탭도 바꾼다
+  const cur = tabMap.get(globalActive);
+  if (info.win.isFocused() || !cur || cur.winId === info.win.id) setGlobalActive(id);
+  // 키보드 입력이 보이는 탭으로 가게: 사용자가 연 새 탭은 주소창, 그 밖에는 페이지
+  if (focus === "address") { info.win.webContents.focus(); sendTo(info, "ui:focus-address"); }
+  else if (focus === "page") tabMap.get(id).wc.focus();
+  pushState(info);
+}
+
+function closeTab(info, id) {
+  const t = tabMap.get(id);
+  if (!t) return;
+  const i = info.order.indexOf(id);
+  info.order.splice(i, 1);
+  tabMap.delete(id);
+  try { info.win.contentView.removeChildView(t.view); } catch {}
+  if (!t.wc.isDestroyed()) t.wc.close();
+  if (!info.order.length) { info.win.close(); return; } // 마지막 탭을 닫으면 그 창을 닫는다
+  if (info.activeTab === id) activateTab(info, info.order[i] || info.order[i - 1]);
+  else pushState(info);
+}
+
+function cycleTab(info, step) {
+  const o = info.order;
+  if (o.length < 2) return;
+  activateTab(info, o[(o.indexOf(info.activeTab) + step + o.length) % o.length]);
+}
+
+const activeWc = (info) => { const t = info && tabMap.get(info.activeTab); return t && !t.wc.isDestroyed() ? t.wc : null; };
+
+// ---- 화면(탭 막대·주소창)에서 오는 요청 ----
+ipcMain.handle("tabs:get", (e) => { const info = winOf(e.sender); return info ? tabState(info) : { tabs: [], activeId: null }; });
+ipcMain.on("tabs:create", (e, url, opts) => { const info = winOf(e.sender); if (info) createTab(info, url || HOME, opts || {}); });
+ipcMain.on("tabs:activate", (e, id) => { const info = winOf(e.sender); if (info) activateTab(info, id); });
+ipcMain.on("tabs:close", (e, id) => { const info = winOf(e.sender); if (info) closeTab(info, id || info.activeTab); });
+ipcMain.on("tabs:bounds", (e, b) => { const info = winOf(e.sender); if (info && b) { info.bounds = b; layout(info); } });
+ipcMain.on("nav", (e, op, arg) => {
+  const info = winOf(e.sender), wc = activeWc(info);
+  if (!wc) return;
+  const h = wc.navigationHistory;
+  if (op === "back") { if (h.canGoBack()) h.goBack(); }
+  else if (op === "forward") { if (h.canGoForward()) h.goForward(); }
+  else if (op === "reload") wc.reload();
+  else if (op === "home") wc.loadURL(HOME).catch(() => {});
+  else if (op === "load" && /^https?:/i.test(arg || "")) wc.loadURL(arg).catch(() => {});
+  if (op !== "reload") wc.focus(); // 이동 후에는 페이지에서 바로 입력·스크롤할 수 있게
+});
+// 앱 안 대화창이 "현재 페이지 첨부"할 때 쓰는 글 추출 (블로그·카페처럼 iframe 안 본문 포함)
+const EXTRACT = `(() => {
+  const sel = [], parts = [];
+  const walk = (win) => { try { const doc = win.document; const s = String(win.getSelection() || "").trim(); if (s) sel.push(s);
+    if (doc.body) parts.push(doc.body.innerText);
+    for (const f of doc.querySelectorAll("iframe")) { try { if (f.contentWindow) walk(f.contentWindow); } catch {} } } catch {} };
+  walk(window);
+  return { title: document.title, url: location.href, selection: sel.join("\\n"), text: parts.join("\\n\\n") };
+})()`;
+ipcMain.handle("tabs:extract", async (e) => {
+  const wc = activeWc(winOf(e.sender));
+  if (!wc) throw new Error("열린 페이지가 없습니다.");
+  return wc.executeJavaScript(EXTRACT);
+});
+ipcMain.on("win:new", () => createWindow());
+
+// ---- Claude(MCP)용 탭 조작 ----
 const currentWin = () => { const t = tabMap.get(globalActive); return (t && wins.get(t.winId)) || allWins()[0]; };
 const winOfTab = (id) => { const t = tabMap.get(id); if (!t) throw new Error(id + " 탭이 없습니다. list_tabs로 확인하세요."); return wins.get(t.winId); };
 
@@ -180,32 +272,10 @@ driver.setTabs({
     .map(([id, t]) => ({ tab_id: id, window: wins.get(t.winId).no, title: t.wc.getTitle(), url: t.wc.getURL(), active: id === globalActive, shown: wins.get(t.winId).activeTab === id })),
   windowCount: () => allWins().length,
   windowNoOf: (id) => { const t = tabMap.get(id); return t && wins.get(t.winId) ? wins.get(t.winId).no : null; },
-  open: (url) => tabCommand(currentWin(), "new", { url }),
-  switchTo: async (id) => { const info = winOfTab(id); const r = await tabCommand(info, "switch", { id }); info.win.focus(); setGlobalActive(id); return r; },
-  close: (id) => tabCommand(winOfTab(id), "close", { id }),
-  openWindow: (url) => new Promise((resolve, reject) => {
-    const info = createWindow(url);
-    let n = 0;
-    const timer = setInterval(() => {
-      if (info.activeTab && tabMap.has(info.activeTab)) { clearInterval(timer); info.win.focus(); setGlobalActive(info.activeTab); resolve(info.activeTab); }
-      else if (++n > 150) { clearInterval(timer); reject(new Error("새 창이 열리지 않았습니다.")); }
-    }, 100);
-  }),
-});
-
-app.on("web-contents-created", (_e, contents) => {
-  if (contents.getType() !== "webview") return;
-  const hostInfo = () => { const host = contents.hostWebContents; return host && winOf(host); };
-  // 새 창으로 여는 링크(target=_blank, Ctrl+클릭)는 같은 창의 새 탭으로, Shift+클릭은 새 창으로
-  contents.setWindowOpenHandler(({ url, disposition }) => {
-    if (/^https?:/i.test(url)) {
-      if (disposition === "new-window") createWindow(url);
-      else sendTo(hostInfo(), "tabs:open", { url, activate: disposition !== "background-tab" });
-    }
-    return { action: "deny" };
-  });
-  // 주의: 페이지의 키 입력을 가로채는 before-input-event는 쓰지 않는다.
-  // Windows 한글 입력기(IME)와 충돌해 한/영 전환·한글 입력이 깨질 수 있다. 단축키는 아래 앱 메뉴로 처리한다.
+  open: async (url) => { const info = currentWin(); if (!info) throw new Error("열린 브라우저 창이 없습니다."); const id = createTab(info, url || HOME); setGlobalActive(id); return id; },
+  switchTo: async (id) => { const info = winOfTab(id); activateTab(info, id); info.win.focus(); setGlobalActive(id); return id; },
+  close: async (id) => { closeTab(winOfTab(id), id); return id; },
+  openWindow: async (url) => { const info = createWindow(url); info.win.focus(); setGlobalActive(info.activeTab); return info.activeTab; },
 });
 
 // ---------- 북마크 ----------
@@ -256,12 +326,77 @@ ipcMain.handle("bm:menu", (e) => new Promise((resolve) => {
   menu.popup({ window: BrowserWindow.fromWebContents(e.sender), callback: () => setTimeout(() => resolve(picked), 0) });
 }));
 ipcMain.on("bm:open-window", (_e, url) => createWindow(url));
+
+// 크롬 북마크 가져오기: 크롬의 모든 프로필에 있는 Bookmarks 파일(JSON)을 읽어 중복 없이 추가
+function chromeBookmarkFiles() {
+  const home = require("os").homedir();
+  const roots = process.platform === "win32"
+    ? [path.join(process.env.LOCALAPPDATA || path.join(home, "AppData", "Local"), "Google", "Chrome", "User Data")]
+    : process.platform === "darwin"
+      ? [path.join(home, "Library", "Application Support", "Google", "Chrome")]
+      : [path.join(home, ".config", "google-chrome"), path.join(home, ".config", "chromium")];
+  const files = [];
+  for (const root of roots) {
+    let dirs = [];
+    try { dirs = fs.readdirSync(root); } catch { continue; }
+    for (const d of dirs) {
+      if (d !== "Default" && !/^Profile \d+$/.test(d)) continue;
+      const f = path.join(root, d, "Bookmarks");
+      if (fs.existsSync(f)) files.push(f);
+    }
+  }
+  return files;
+}
+function importChromeBookmarks() {
+  const files = chromeBookmarkFiles();
+  if (!files.length) return { files: 0, found: 0, added: 0 };
+  const found = [];
+  const walk = (node) => {
+    if (!node) return;
+    if (node.type === "url" && /^https?:/i.test(node.url || "")) found.push({ title: (node.name || node.url).slice(0, 80), url: node.url });
+    for (const c of node.children || []) walk(c);
+  };
+  for (const f of files) {
+    try {
+      const roots = JSON.parse(fs.readFileSync(f, "utf8")).roots || {};
+      for (const key of ["bookmark_bar", "other", "synced"]) walk(roots[key]); // 북마크바 → 기타 → 모바일 순서
+    } catch {}
+  }
+  const list = loadBookmarks();
+  let added = 0;
+  for (const b of found) {
+    if (list.some((x) => sameUrl(x.url, b.url))) continue;
+    list.push(b);
+    added++;
+  }
+  if (added) saveBookmarks(list);
+  return { files: files.length, found: found.length, added };
+}
+async function importChromeWithDialog(win) {
+  const r = importChromeBookmarks();
+  const message = !r.files ? "크롬 북마크를 찾지 못했습니다."
+    : r.added ? `크롬 북마크 ${r.added}개를 가져왔습니다.` : "새로 가져올 북마크가 없습니다.";
+  const detail = !r.files ? "이 컴퓨터에 크롬이 설치되어 있고, 크롬에 북마크가 있는지 확인해 주세요."
+    : `크롬 프로필 ${r.files}개에서 북마크 ${r.found}개를 찾았고, 이미 있는 ${r.found - r.added}개는 건너뛰었습니다.`;
+  if (win) await dialog.showMessageBox(win, { type: "info", title: "크롬 북마크 가져오기", message, detail, buttons: ["확인"], noLink: true });
+  return r;
+}
+ipcMain.handle("bm:import-chrome", (e) => importChromeWithDialog(BrowserWindow.fromWebContents(e.sender)));
 driver.setBookmarks({ list: loadBookmarks, add: addBookmark });
 
 // ---------- 단축키 (앱 메뉴) ----------
 // 메뉴 단축키는 페이지 키 입력을 건드리지 않고, 커서가 페이지 안에 있어도 동작한다. 메뉴 막대는 Alt를 누를 때만 보인다.
 function shortcut(key) {
-  return () => { const w = BrowserWindow.getFocusedWindow(); const info = w && wins.get(w.id); if (info) sendTo(info, "tabs:shortcut", key); };
+  return () => {
+    const w = BrowserWindow.getFocusedWindow(); const info = w && wins.get(w.id);
+    if (!info) return;
+    if (key === "new") createTab(info, HOME, { focus: "address" });
+    else if (key === "close") closeTab(info, info.activeTab);
+    else if (key === "next") cycleTab(info, 1);
+    else if (key === "prev") cycleTab(info, -1);
+    else if (key === "reload") { const wc = activeWc(info); if (wc) wc.reload(); }
+    else sendTo(info, "tabs:shortcut", key); // 북마크·대화창은 화면 쪽에서 처리
+  };
 }
 function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate([
@@ -271,6 +406,11 @@ function buildMenu() {
       { label: "새 창", accelerator: "CmdOrCtrl+N", click: () => createWindow() },
       { label: "탭 닫기", accelerator: "CmdOrCtrl+W", click: shortcut("close") },
       { label: "이 페이지 북마크", accelerator: "CmdOrCtrl+D", click: shortcut("bookmark") },
+      { label: "크롬 북마크 가져오기", click: () => importChromeWithDialog(BrowserWindow.getFocusedWindow()) },
+      { label: "이 페이지를 기본 브라우저(크롬)에서 열기", accelerator: "CmdOrCtrl+Shift+O", click: () => {
+        const w = BrowserWindow.getFocusedWindow(); const wc = activeWc(w && wins.get(w.id));
+        if (wc && /^https?:/i.test(wc.getURL())) shell.openExternal(wc.getURL());
+      } },
       { type: "separator" },
       { label: "끝내기", role: "quit" },
     ] },

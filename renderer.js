@@ -8,82 +8,51 @@ const BASE_TITLE = "네이버 + Claude 브라우저" + (WIN_NO !== "1" ? ` · �
 document.title = BASE_TITLE;
 
 // ---------- 탭 ----------
-const tabs = new Map(); // id -> { id, view, el }
-let activeId = null;
-const view = () => tabs.get(activeId).view; // 지금 보고 있는 탭의 webview
+// 페이지는 main 프로세스가 탭마다 WebContentsView로 띄운다. 여기서는 탭 막대를 그리고, 페이지 자리의 위치를 알려준다.
+let state = { tabs: [], activeId: null };
+const activeTab = () => state.tabs.find((t) => t.id === state.activeId) || {};
+const tabsApi = window.api.tabs;
 
-function createTab(url = HOME, activate = true, focus = "page") {
-  const id = window.api.allocTabId(); // 모든 창을 통틀어 겹치지 않는 번호
-  const wv = document.createElement("webview");
-  wv.setAttribute("allowpopups", "");
-  wv.src = "about:blank"; // 빈 페이지로 먼저 붙여 바로 등록한 뒤 실제 주소를 연다
-  $("views").appendChild(wv);
-
-  const el = document.createElement("div");
-  el.className = "tab";
-  el.innerHTML = '<span class="title">새 탭</span><button class="close" title="탭 닫기 (Ctrl+W)">×</button>';
-  el.onclick = () => activateTab(id);
-  el.onauxclick = (e) => { if (e.button === 1) closeTab(id); }; // 가운데 클릭으로 닫기
-  el.querySelector(".close").onclick = (e) => { e.stopPropagation(); closeTab(id); };
-  $("tabbar").insertBefore(el, $("new-tab"));
-
-  const tab = { id, view: wv, el, registered: null };
-  tab.registered = new Promise((resolve) => {
-    // 느리거나 실패하는 페이지라도 탭은 바로 조작할 수 있게: 빈 페이지가 준비되면 등록 → 실제 주소 열기
-    wv.addEventListener("dom-ready", () => {
-      window.api.registerTab(id, wv.getWebContentsId());
-      wv.loadURL(url).catch(() => {});
-      resolve();
-    }, { once: true });
-  });
-  const setTitle = (t) => { el.querySelector(".title").textContent = t || wv.getURL() || "새 탭"; el.title = t || ""; };
-  wv.addEventListener("page-title-updated", (e) => setTitle(e.title));
-  wv.addEventListener("did-navigate", (e) => { if (activeId === id && e.url !== "about:blank") { $("url").value = e.url; updateStar(); } });
-  wv.addEventListener("did-navigate-in-page", (e) => { if (e.isMainFrame && activeId === id) { $("url").value = e.url; updateStar(); } });
-  tabs.set(id, tab);
-  if (activate || !activeId) activateTab(id, { focus });
-  return tab;
-}
-
-function activateTab(id, { focus = "page" } = {}) {
-  const tab = tabs.get(id);
-  if (!tab) return;
-  activeId = id;
-  for (const t of tabs.values()) {
-    t.view.classList.toggle("active", t.id === id);
-    t.el.classList.toggle("active", t.id === id);
-    if (t.id !== id) { try { t.view.blur(); } catch {} } // 숨겨진 탭이 키보드 입력(한/영 포함)을 잡고 있지 않게
+function renderTabs() {
+  const bar = $("tabbar");
+  bar.querySelectorAll(".tab").forEach((e) => e.remove());
+  for (const t of state.tabs) {
+    const el = document.createElement("div");
+    el.className = "tab" + (t.id === state.activeId ? " active" : "");
+    el.title = t.title || t.url || "";
+    el.innerHTML = '<span class="title"></span><button class="close" title="탭 닫기 (Ctrl+W)">×</button>';
+    el.querySelector(".title").textContent = (t.loading ? "⏳ " : "") + (t.title || t.url || "새 탭");
+    el.onclick = () => tabsApi.activate(t.id);
+    el.onauxclick = (e) => { if (e.button === 1) tabsApi.close(t.id); }; // 가운데 클릭으로 닫기
+    el.querySelector(".close").onclick = (e) => { e.stopPropagation(); tabsApi.close(t.id); };
+    bar.insertBefore(el, $("new-tab"));
+    if (t.id === state.activeId) el.scrollIntoView({ inline: "nearest" });
   }
-  let u = "";
-  try { u = tab.view.getURL(); } catch {}
-  $("url").value = u && u !== "about:blank" ? u : "";
-  tab.el.scrollIntoView({ inline: "nearest" });
+  const a = activeTab();
+  if (document.activeElement !== $("url")) $("url").value = a.url && a.url !== "about:blank" ? a.url : "";
+  $("back").disabled = !a.canGoBack;
+  $("forward").disabled = !a.canGoForward;
   updateStar();
-  // 키보드 입력이 보이는 탭으로 가게: 새 빈 탭이면 주소창, 아니면 페이지
-  if (focus === "address") { $("url").focus(); $("url").select(); }
-  else if (focus === "page") tab.view.focus();
-  window.api.tabActivated(id);
 }
+tabsApi.onState((s) => { state = s; renderTabs(); });
+tabsApi.getState().then((s) => { state = s; renderTabs(); });
+window.api.onFocusAddress(() => { $("url").focus(); $("url").select(); });
 
-function closeTab(id) {
-  const tab = tabs.get(id);
-  if (!tab) return;
-  const order = [...tabs.keys()];
-  const i = order.indexOf(id);
-  tab.view.remove();
-  tab.el.remove();
-  tabs.delete(id);
-  window.api.tabClosed(id);
-  if (!tabs.size) { window.api.closeWindow(); return; } // 마지막 탭을 닫으면 이 창을 닫는다
-  else if (activeId === id) activateTab(order[i + 1] || order[i - 1]);
+// 페이지 자리(#views)의 위치·크기를 main에 알려 페이지를 거기에 맞춘다 (대화창 접기, 창 크기 변경 등)
+let boundsRaf = 0;
+function reportBounds() {
+  cancelAnimationFrame(boundsRaf);
+  boundsRaf = requestAnimationFrame(() => {
+    const r = $("views").getBoundingClientRect();
+    tabsApi.setBounds({ x: r.left, y: r.top, width: r.width, height: r.height });
+  });
 }
+new ResizeObserver(reportBounds).observe($("views"));
+new ResizeObserver(reportBounds).observe(document.body);
+window.addEventListener("resize", reportBounds);
+reportBounds();
 
-function cycleTab(step) {
-  const order = [...tabs.keys()];
-  activateTab(order[(order.indexOf(activeId) + step + order.length) % order.length]);
-}
-
-const newTabFromUser = () => createTab(HOME, true, "address"); // 사용자가 연 새 탭: 바로 주소를 칠 수 있게
+const newTabFromUser = () => tabsApi.create(HOME, { activate: true, focus: "address" }); // 바로 주소를 칠 수 있게
 $("new-tab").onclick = newTabFromUser;
 $("new-window").onclick = () => window.api.newWindow();
 
@@ -92,41 +61,17 @@ function showConfirm(on) { $("confirm-toggle").textContent = "확인 창: " + (o
 window.api.getConfirm().then(showConfirm);
 window.api.onConfirmChanged(showConfirm);
 $("confirm-toggle").onclick = async () => showConfirm(await window.api.setConfirm(!$("confirm-toggle").classList.contains("on")));
-window.api.onTabsOpen(({ url, activate }) => createTab(url, activate));
 window.api.onTabsShortcut((key) => {
-  if (key === "new") newTabFromUser();
-  else if (key === "close") closeTab(activeId);
-  else if (key === "next") cycleTab(1);
-  else if (key === "prev") cycleTab(-1);
-  else if (key === "reload") view().reload();
-  else if (key === "bookmark") toggleBookmark();
+  if (key === "bookmark") toggleBookmark();
+  else if (key === "panel") togglePanel();
 });
-// Ctrl+T / Ctrl+N / Ctrl+W / Ctrl+Tab / F5 는 앱 메뉴의 단축키로 처리 (main.js buildMenu)
-
-// Claude(MCP)가 보내는 탭 명령: 새 탭 / 전환 / 닫기
-window.api.onTabsCommand(async ({ reqId, op, args }) => {
-  try {
-    let result = null;
-    if (op === "new") { const t = createTab(args.url || HOME, true); await t.registered; result = t.id; }
-    else if (op === "switch") { if (!tabs.has(args.id)) throw new Error(args.id + " 탭이 없습니다."); activateTab(args.id); result = args.id; }
-    else if (op === "close") {
-      if (!tabs.has(args.id)) throw new Error(args.id + " 탭이 없습니다.");
-      // 마지막 탭이면 창이 닫히므로 먼저 답하고 닫는다
-      window.api.tabsCommandDone(reqId, { ok: true, result: tabs.size === 1 ? "window-closed" : activeId });
-      closeTab(args.id);
-      return;
-    }
-    window.api.tabsCommandDone(reqId, { ok: true, result });
-  } catch (e) {
-    window.api.tabsCommandDone(reqId, { ok: false, error: e.message });
-  }
-});
+// Ctrl+T / Ctrl+N / Ctrl+W / Ctrl+Tab / F5 는 앱 메뉴 단축키로 main에서 처리
 
 // ---------- 브라우저 ----------
-$("back").onclick = () => view().canGoBack() && view().goBack();
-$("forward").onclick = () => view().canGoForward() && view().goForward();
-$("reload").onclick = () => view().reload();
-$("home").onclick = () => view().loadURL(HOME);
+$("back").onclick = () => window.api.nav("back");
+$("forward").onclick = () => window.api.nav("forward");
+$("reload").onclick = () => window.api.nav("reload");
+$("home").onclick = () => window.api.nav("home");
 // 한글 입력 중(조합 중)에 Enter를 누르면 마지막 글자가 아직 확정되지 않았으므로, 확정된 뒤에 처리한다
 function onEnterAfterIme(el, handler, needCtrl = false) {
   let pending = false, timer = null, last = 0;
@@ -149,18 +94,18 @@ function onEnterAfterIme(el, handler, needCtrl = false) {
 function goFromAddressBar() {
   const v = $("url").value.trim();
   if (!v) return;
-  const looksLikeUrl = /^https?:\/\//i.test(v) || /^[\w-]+(\.[\w-]+)+(\/.*)?$/.test(v);
-  view().loadURL(looksLikeUrl ? (/^https?:/i.test(v) ? v : "https://" + v)
-    : "https://search.naver.com/search.naver?query=" + encodeURIComponent(v)).catch(() => {});
-  view().focus(); // 이동 후에는 페이지에서 바로 입력·스크롤할 수 있게
+  // 주소처럼 보이면 열고(포트·localhost 포함), 아니면 네이버 검색
+  const looksLikeUrl = /^https?:\/\//i.test(v) || /^(localhost|[\w-]+(\.[\w-]+)+)(:\d+)?(\/.*)?$/i.test(v);
+  window.api.nav("load", looksLikeUrl ? (/^https?:/i.test(v) ? v : "https://" + v)
+    : "https://search.naver.com/search.naver?query=" + encodeURIComponent(v)); // 이동 후 페이지로 커서
 }
 onEnterAfterIme($("url"), goFromAddressBar);
 // ---------- 북마크 ----------
 let bookmarks = [];
 const normUrl = (u) => String(u || "").replace(/\/$/, "");
-const currentUrl = () => { try { return view().getURL(); } catch { return ""; } };
+const currentUrl = () => activeTab().url || "";
 function updateStar() {
-  if (!activeId) return;
+  if (!state.activeId) return;
   const on = bookmarks.some((b) => normUrl(b.url) === normUrl(currentUrl()));
   const btn = $("bookmark");
   btn.classList.toggle("on", on);
@@ -168,10 +113,10 @@ function updateStar() {
   btn.title = on ? "북마크 삭제 (Ctrl+D)" : "이 페이지 북마크 (Ctrl+D)";
 }
 function openBookmark(url, where) {
-  if (where === "newtab") createTab(url, true);
-  else if (where === "background") createTab(url, false);
+  if (where === "newtab") tabsApi.create(url, { activate: true });
+  else if (where === "background") tabsApi.create(url, { activate: false });
   else if (where === "newwindow") window.api.bookmarks.openWindow(url);
-  else { view().loadURL(url).catch(() => {}); view().focus(); }
+  else window.api.nav("load", url);
 }
 function startRename(btn, b) {
   const input = document.createElement("input");
@@ -208,13 +153,19 @@ function renderBookmarks() {
     };
     bar.appendChild(btn);
   }
+  const imp = document.createElement("button"); // 맨 끝: 크롬 북마크 가져오기
+  imp.className = "bm bm-import";
+  imp.textContent = "⤓ 크롬 북마크 가져오기";
+  imp.title = "크롬에 저장된 북마크를 모두 가져옵니다 (이미 있는 것은 건너뜀)";
+  imp.onclick = () => window.api.bookmarks.importChrome();
+  bar.appendChild(imp);
 }
 async function toggleBookmark() {
   const url = currentUrl();
   if (!/^https?:/i.test(url)) return;
   const on = bookmarks.some((b) => normUrl(b.url) === normUrl(url));
   let title = url;
-  try { title = view().getTitle() || url; } catch {}
+  title = activeTab().title || url;
   bookmarks = on ? await window.api.bookmarks.remove(url) : await window.api.bookmarks.add(title, url);
   renderBookmarks(); updateStar();
 }
@@ -222,27 +173,9 @@ $("bookmark").onclick = toggleBookmark;
 window.api.bookmarks.onChanged((list) => { bookmarks = list; renderBookmarks(); updateStar(); });
 window.api.bookmarks.list().then((list) => { bookmarks = list; renderBookmarks(); updateStar(); });
 
-createTab(params.get("url") || HOME); // 새 창이 주소를 받아 열렸으면 그 주소로
-
-// 페이지에서 텍스트 추출 (블로그·카페처럼 iframe 안에 본문이 있는 경우도 포함)
-const EXTRACT = `(() => {
-  const sel = [];
-  const parts = [];
-  const walk = (win) => {
-    try {
-      const doc = win.document;
-      const s = String(win.getSelection() || "").trim();
-      if (s) sel.push(s);
-      if (doc.body) parts.push(doc.body.innerText);
-      for (const f of doc.querySelectorAll("iframe")) { try { if (f.contentWindow) walk(f.contentWindow); } catch {} }
-    } catch {}
-  };
-  walk(window);
-  return { title: document.title, url: location.href, selection: sel.join("\\n"), text: parts.join("\\n\\n") };
-})()`;
 
 async function getPage() {
-  const p = await view().executeJavaScript(EXTRACT);
+  const p = await tabsApi.extract(); // main이 현재 탭에서 글을 뽑아 준다
   const usingSelection = Boolean(p.selection);
   let body = (usingSelection ? p.selection : p.text).replace(/\n{3,}/g, "\n\n").trim();
   const truncated = body.length > MAX_CHARS;
@@ -272,7 +205,6 @@ function setPanel(show) {
 const togglePanel = () => setPanel(document.body.classList.contains("panel-hidden"));
 $("toggle-panel").onclick = togglePanel;
 $("collapse-panel").onclick = () => setPanel(false);
-window.api.onTabsShortcut((key) => { if (key === "panel") togglePanel(); });
 
 // ---------- 설정 ----------
 // 고른 모델은 다음 실행 때도 기억

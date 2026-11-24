@@ -25,10 +25,11 @@ button:hover { background: #eef; }
 #bookmarks:empty::before { content: "☆ 버튼(Ctrl+D)으로 자주 가는 페이지를 북마크하세요"; color: #999; font-size: 12px; }
 .bm { border: 0; background: none; border-radius: 6px; padding: 3px 10px; font-size: 13px; white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; color: #333; }
 .bm:hover { background: #eef0f3; }
+.bm-import { color: #888; margin-left: auto; }
 .bm-edit { font: inherit; font-size: 13px; padding: 2px 6px; border: 1px solid #d97757; border-radius: 6px; width: 140px; }
-#views { flex: 1; position: relative; }
-#views webview { position: absolute; inset: 0; width: 100%; height: 100%; visibility: hidden; }
-#views webview.active { visibility: visible; }
+/* 페이지 자리: 실제 페이지(WebContentsView)는 main이 이 위치에 겹쳐 띄운다 */
+#views { flex: 1; min-height: 0; background: #fff; }
+#back:disabled, #forward:disabled { opacity: .35; cursor: default; }
 body.panel-hidden #panel { display: none; }
 #collapse-panel { font-weight: 700; }
 #toggle-panel.on { background: #fbe9e2; border-color: #d97757; }

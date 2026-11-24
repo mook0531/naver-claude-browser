@@ -1,4 +1,4 @@
-// 브라우저 조작 모듈: 앱 안의 webview(네이버 화면)를 코드로 움직인다.
+// 브라우저 조작 모듈: 탭의 페이지(WebContentsView)를 코드로 움직인다.
 // MCP 서버(mcp-server.js)가 이 함수들을 Claude의 도구로 노출한다.
 const MAX_TEXT = 40000; // 한 번에 Claude에게 돌려줄 페이지 글자 수 상한
 

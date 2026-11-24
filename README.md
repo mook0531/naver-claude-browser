@@ -61,7 +61,9 @@ Claude가 쓸 수 있는 도구: `naver_search`, `navigate`, `get_page_text`, `r
 
 **탭**: 위쪽 탭 바의 **+**(Ctrl+T)로 새 탭, **×**(Ctrl+W)로 닫기, Ctrl+Tab으로 전환합니다. 새 창으로 여는 링크는 새 탭으로 열립니다(Ctrl+클릭은 뒤쪽 탭, Shift+클릭은 새 창).
 
-**북마크**: 주소창 옆 **☆**(Ctrl+D)로 지금 페이지를 북마크하고, 주소창 아래 북마크 막대에서 엽니다(Ctrl+클릭·가운데 클릭: 새 탭, Shift+클릭: 새 창, 우클릭: 이름 바꾸기·삭제). 모든 창이 같이 쓰며 `bookmarks.json`(사용자 데이터 폴더)에 저장됩니다. Claude도 `list_bookmarks` · `add_bookmark`로 씁니다.
+**북마크**: 주소창 옆 **☆**(Ctrl+D)로 지금 페이지를 북마크하고, 주소창 아래 북마크 막대에서 엽니다(Ctrl+클릭·가운데 클릭: 새 탭, Shift+클릭: 새 창, 우클릭: 이름 바꾸기·삭제). 모든 창이 같이 쓰며 `bookmarks.json`(사용자 데이터 폴더)에 저장됩니다. Claude도 `list_bookmarks` · `add_bookmark`로 씁니다. 북마크 막대 끝의 **⤓ 크롬 북마크 가져오기**(또는 Alt → 파일 메뉴)로 크롬의 모든 프로필 북마크를 중복 없이 가져옵니다.
+
+**크롬에서 열기**: 지금 페이지를 기본 브라우저(크롬)에서 열려면 Ctrl+Shift+O. 네이버 쇼핑처럼 이 브라우저의 접속을 제한하는 페이지에 쓰세요.
 
 **단축키**: Ctrl+T 새 탭, Ctrl+W 탭 닫기, Ctrl+N 새 창, Ctrl+Tab 탭 전환, Ctrl+D 북마크, Ctrl+Shift+L 대화창, F5 새로고침. 메뉴 막대는 Alt를 누르면 보입니다.
 
@@ -83,6 +85,11 @@ Claude도 `list_tabs` · `new_tab` · `new_window` · `switch_tab` · `close_tab
 |---|---|
 | `main.js` | 창 생성, API 키 저장, Claude API 호출(스트리밍), MCP 서버 시작 |
 | `browser-driver.js` | 브라우저 조작(이동, 읽기, 클릭, 입력, 스크롤, 캡처) |
+
+화면 구조: 위쪽 화면(탭 막대·주소창·북마크·대화창)은 `index.html`, 페이지는 탭마다 main 프로세스의 `WebContentsView`로 그 아래에 붙입니다(예전 `<webview>` 방식은 Windows 한글 입력과 충돌).
+
+| 파일 | 역할 |
+|---|---|
 | `mcp-server.js` | Claude 앱용 MCP 서버 (127.0.0.1, 토큰 인증) |
 | `mcp-bridge.js` | Claude 앱 ↔ 브라우저 연결 다리, 브라우저 자동 실행 |
 | `naver-browser.mcpb`, `extension/` | Claude 앱 확장 프로그램 (다시 만들기: `npm run build:extension`) |
