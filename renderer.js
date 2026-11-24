@@ -97,15 +97,9 @@ window.api.onTabsShortcut((key) => {
   else if (key === "close") closeTab(activeId);
   else if (key === "next") cycleTab(1);
   else if (key === "prev") cycleTab(-1);
+  else if (key === "reload") view().reload();
 });
-document.addEventListener("keydown", (e) => {
-  if (!e.ctrlKey && !e.metaKey) return;
-  const k = e.key.toLowerCase();
-  if (k === "t") { e.preventDefault(); newTabFromUser(); }
-  else if (k === "n") { e.preventDefault(); window.api.newWindow(); }
-  else if (k === "w") { e.preventDefault(); closeTab(activeId); }
-  else if (k === "tab") { e.preventDefault(); cycleTab(e.shiftKey ? -1 : 1); }
-});
+// Ctrl+T / Ctrl+N / Ctrl+W / Ctrl+Tab / F5 는 앱 메뉴의 단축키로 처리 (main.js buildMenu)
 
 // Claude(MCP)가 보내는 탭 명령: 새 탭 / 전환 / 닫기
 window.api.onTabsCommand(async ({ reqId, op, args }) => {
@@ -209,9 +203,6 @@ function setPanel(show) {
 const togglePanel = () => setPanel(document.body.classList.contains("panel-hidden"));
 $("toggle-panel").onclick = togglePanel;
 $("collapse-panel").onclick = () => setPanel(false);
-document.addEventListener("keydown", (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "l") { e.preventDefault(); togglePanel(); }
-});
 window.api.onTabsShortcut((key) => { if (key === "panel") togglePanel(); });
 
 // ---------- 설정 ----------

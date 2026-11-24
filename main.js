@@ -1,5 +1,5 @@
 // 메인 프로세스: 창 생성, API 키 보관, Claude 호출
-const { app, BrowserWindow, ipcMain, session, safeStorage, screen, dialog, webContents } = require("electron");
+const { app, BrowserWindow, ipcMain, session, safeStorage, screen, dialog, webContents, Menu } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const Anthropic = require("@anthropic-ai/sdk");
@@ -57,6 +57,7 @@ function createWindow(url) {
     width,
     height: wa.height - shift,
     title: "네이버 + Claude 브라우저",
+    autoHideMenuBar: true, // 메뉴 막대는 숨기고(Alt로 표시) 단축키만 사용
     icon: path.join(__dirname, "assets", process.platform === "win32" ? "icon.ico" : "icon.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -203,15 +204,39 @@ app.on("web-contents-created", (_e, contents) => {
     }
     return { action: "deny" };
   });
-  // 페이지 안에 커서가 있어도 탭·창 단축키가 동작하도록
-  contents.on("before-input-event", (event, input) => {
-    if (input.type !== "keyDown" || !(input.control || input.meta)) return;
-    const k = input.key.toLowerCase();
-    if (k === "n") { event.preventDefault(); createWindow(); return; }
-    const key = k === "l" && input.shift ? "panel" : k === "t" ? "new" : k === "w" ? "close" : k === "tab" ? (input.shift ? "prev" : "next") : null;
-    if (key) { event.preventDefault(); sendTo(hostInfo(), "tabs:shortcut", key); }
-  });
+  // 주의: 페이지의 키 입력을 가로채는 before-input-event는 쓰지 않는다.
+  // Windows 한글 입력기(IME)와 충돌해 한/영 전환·한글 입력이 깨질 수 있다. 단축키는 아래 앱 메뉴로 처리한다.
 });
+
+// ---------- 단축키 (앱 메뉴) ----------
+// 메뉴 단축키는 페이지 키 입력을 건드리지 않고, 커서가 페이지 안에 있어도 동작한다. 메뉴 막대는 Alt를 누를 때만 보인다.
+function shortcut(key) {
+  return () => { const w = BrowserWindow.getFocusedWindow(); const info = w && wins.get(w.id); if (info) sendTo(info, "tabs:shortcut", key); };
+}
+function buildMenu() {
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
+    { label: "파일", submenu: [
+      { label: "새 탭", accelerator: "CmdOrCtrl+T", click: shortcut("new") },
+      { label: "새 창", accelerator: "CmdOrCtrl+N", click: () => createWindow() },
+      { label: "탭 닫기", accelerator: "CmdOrCtrl+W", click: shortcut("close") },
+      { type: "separator" },
+      { label: "끝내기", role: "quit" },
+    ] },
+    { label: "편집", submenu: [
+      { role: "undo", label: "실행 취소" }, { role: "redo", label: "다시 실행" }, { type: "separator" },
+      { role: "cut", label: "잘라내기" }, { role: "copy", label: "복사" }, { role: "paste", label: "붙여넣기" }, { role: "selectAll", label: "모두 선택" },
+    ] },
+    { label: "보기", submenu: [
+      { label: "다음 탭", accelerator: "Ctrl+Tab", click: shortcut("next") },
+      { label: "이전 탭", accelerator: "Ctrl+Shift+Tab", click: shortcut("prev") },
+      { label: "대화창 열기/접기", accelerator: "CmdOrCtrl+Shift+L", click: shortcut("panel") },
+      { label: "새로고침", accelerator: "F5", click: shortcut("reload") },
+      { type: "separator" },
+      { role: "zoomIn", label: "확대" }, { role: "zoomOut", label: "축소" }, { role: "resetZoom", label: "원래 크기" },
+    ] },
+  ]));
+}
 
 // ---------- IPC ----------
 ipcMain.handle("settings:hasKey", () => Boolean(loadApiKey()));
@@ -279,6 +304,7 @@ if (!app.requestSingleInstanceLock()) {
   // 이미 켜져 있을 때 아이콘을 또 누르면 새 창을 연다
   app.on("second-instance", () => createWindow());
   app.whenReady().then(() => {
+    buildMenu();
     createWindow();
     // Claude 데스크톱 앱이 이 브라우저를 조작할 수 있게 MCP 서버 시작
     startMcpServer({
