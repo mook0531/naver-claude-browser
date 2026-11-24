@@ -208,6 +208,56 @@ app.on("web-contents-created", (_e, contents) => {
   // Windows 한글 입력기(IME)와 충돌해 한/영 전환·한글 입력이 깨질 수 있다. 단축키는 아래 앱 메뉴로 처리한다.
 });
 
+// ---------- 북마크 ----------
+// 모든 창이 같이 쓰고, 사용자 데이터 폴더의 bookmarks.json에 저장한다.
+const DEFAULT_BOOKMARKS = [
+  { title: "네이버", url: "https://www.naver.com/" },
+  { title: "네이버 부동산", url: "https://land.naver.com/" },
+  { title: "네이버 광고", url: "https://searchad.naver.com/" },
+];
+const bmPath = () => path.join(app.getPath("userData"), "bookmarks.json");
+function loadBookmarks() {
+  try { const b = JSON.parse(fs.readFileSync(bmPath(), "utf8")); if (Array.isArray(b)) return b; } catch {}
+  return DEFAULT_BOOKMARKS.map((b) => ({ ...b }));
+}
+function saveBookmarks(list) {
+  fs.mkdirSync(path.dirname(bmPath()), { recursive: true });
+  fs.writeFileSync(bmPath(), JSON.stringify(list, null, 2));
+  for (const w of BrowserWindow.getAllWindows()) w.webContents.send("bm:changed", list); // 모든 창에 반영
+  return list;
+}
+const sameUrl = (a, b) => String(a).replace(/\/$/, "") === String(b).replace(/\/$/, "");
+function addBookmark(title, url) {
+  if (!/^https?:/i.test(url)) throw new Error("http/https 주소만 북마크할 수 있습니다.");
+  const list = loadBookmarks();
+  const found = list.find((b) => sameUrl(b.url, url));
+  if (found) found.title = title || found.title; else list.push({ title: (title || url).slice(0, 80), url });
+  return saveBookmarks(list);
+}
+const removeBookmark = (url) => saveBookmarks(loadBookmarks().filter((b) => !sameUrl(b.url, url)));
+ipcMain.handle("bm:list", () => loadBookmarks());
+ipcMain.handle("bm:add", (_e, title, url) => addBookmark(title, url));
+ipcMain.handle("bm:remove", (_e, url) => removeBookmark(url));
+ipcMain.handle("bm:rename", (_e, url, title) => {
+  const list = loadBookmarks(); const b = list.find((x) => sameUrl(x.url, url));
+  if (b && title && title.trim()) b.title = title.trim().slice(0, 80);
+  return saveBookmarks(list);
+});
+// 북마크 우클릭 메뉴 (고른 항목을 돌려줌)
+ipcMain.handle("bm:menu", (e) => new Promise((resolve) => {
+  let picked = null;
+  const menu = Menu.buildFromTemplate([
+    { label: "새 탭에서 열기", click: () => { picked = "newtab"; } },
+    { label: "새 창에서 열기", click: () => { picked = "newwindow"; } },
+    { type: "separator" },
+    { label: "이름 바꾸기", click: () => { picked = "rename"; } },
+    { label: "삭제", click: () => { picked = "remove"; } },
+  ]);
+  menu.popup({ window: BrowserWindow.fromWebContents(e.sender), callback: () => setTimeout(() => resolve(picked), 0) });
+}));
+ipcMain.on("bm:open-window", (_e, url) => createWindow(url));
+driver.setBookmarks({ list: loadBookmarks, add: addBookmark });
+
 // ---------- 단축키 (앱 메뉴) ----------
 // 메뉴 단축키는 페이지 키 입력을 건드리지 않고, 커서가 페이지 안에 있어도 동작한다. 메뉴 막대는 Alt를 누를 때만 보인다.
 function shortcut(key) {
@@ -220,6 +270,7 @@ function buildMenu() {
       { label: "새 탭", accelerator: "CmdOrCtrl+T", click: shortcut("new") },
       { label: "새 창", accelerator: "CmdOrCtrl+N", click: () => createWindow() },
       { label: "탭 닫기", accelerator: "CmdOrCtrl+W", click: shortcut("close") },
+      { label: "이 페이지 북마크", accelerator: "CmdOrCtrl+D", click: shortcut("bookmark") },
       { type: "separator" },
       { label: "끝내기", role: "quit" },
     ] },

@@ -61,6 +61,10 @@ Claude가 쓸 수 있는 도구: `naver_search`, `navigate`, `get_page_text`, `r
 
 **탭**: 위쪽 탭 바의 **+**(Ctrl+T)로 새 탭, **×**(Ctrl+W)로 닫기, Ctrl+Tab으로 전환합니다. 새 창으로 여는 링크는 새 탭으로 열립니다(Ctrl+클릭은 뒤쪽 탭, Shift+클릭은 새 창).
 
+**북마크**: 주소창 옆 **☆**(Ctrl+D)로 지금 페이지를 북마크하고, 주소창 아래 북마크 막대에서 엽니다(Ctrl+클릭·가운데 클릭: 새 탭, Shift+클릭: 새 창, 우클릭: 이름 바꾸기·삭제). 모든 창이 같이 쓰며 `bookmarks.json`(사용자 데이터 폴더)에 저장됩니다. Claude도 `list_bookmarks` · `add_bookmark`로 씁니다.
+
+**단축키**: Ctrl+T 새 탭, Ctrl+W 탭 닫기, Ctrl+N 새 창, Ctrl+Tab 탭 전환, Ctrl+D 북마크, Ctrl+Shift+L 대화창, F5 새로고침. 메뉴 막대는 Alt를 누르면 보입니다.
+
 **여러 창**: 탭 바 오른쪽 **⧉ 새 창**(Ctrl+N)으로 창을 더 엽니다. 브라우저가 켜져 있을 때 바탕화면 아이콘을 다시 눌러도 새 창이 열립니다. 창마다 탭이 따로 있고, 창의 마지막 탭을 닫으면 그 창이 닫힙니다.
 
 Claude도 `list_tabs` · `new_tab` · `new_window` · `switch_tab` · `close_tab`으로 여러 창과 탭을 오가며 페이지를 비교할 수 있습니다. Claude는 사용자가 마지막으로 본 탭을 조작합니다.

@@ -7,6 +7,8 @@ let activeId = null;  // 그 탭의 id (예: tab-2)
 let tabsApi = null;   // main.js가 넣어 주는 탭 목록/열기/전환/닫기
 const setActive = (id, contents) => { activeId = id; wc = contents; };
 const setTabs = (api) => { tabsApi = api; };
+let bmApi = null;     // main.js가 넣어 주는 북마크 목록/추가
+const setBookmarks = (api) => { bmApi = api; };
 const ready = () => {
   if (!wc || wc.isDestroyed()) throw new Error("브라우저 창이 열려 있지 않습니다. 네이버 + Claude 브라우저 앱을 실행하세요.");
   return wc;
@@ -360,6 +362,19 @@ async function closeTab(id) {
   return `${id || "현재 탭"}을(를) 닫았습니다.\n${await listTabs()}`;
 }
 
+// ---------- 북마크 ----------
+const listBookmarks = async () => {
+  const list = bmApi ? bmApi.list() : [];
+  return list.length ? `북마크 ${list.length}개\n` + list.map((b, i) => `${i + 1}. ${b.title} — ${b.url}`).join("\n") : "북마크가 없습니다.";
+};
+async function addBookmark(title, url) {
+  if (!bmApi) throw new Error("북마크 기능을 쓸 수 없습니다.");
+  url = url || ready().getURL();
+  title = title || (url === ready().getURL() ? ready().getTitle() : url);
+  bmApi.add(title, url);
+  return `북마크했습니다: ${title} — ${url}`;
+}
+
 // 화면 캡처: 좌표가 클릭 좌표(CSS 픽셀)와 같도록 크기를 맞춘다
 async function screenshot(region) {
   const c = ready();
@@ -375,6 +390,6 @@ async function screenshot(region) {
 }
 
 module.exports = {
-  setActive, setTabs, waitReady, listTabs, newTab, newWindow, switchTab, closeTab, navigate, naverSearch, getPageText, readPage, find, click,
+  setActive, setTabs, setBookmarks, listBookmarks, addBookmark, waitReady, listTabs, newTab, newWindow, switchTab, closeTab, navigate, naverSearch, getPageText, readPage, find, click,
   typeText, pressKey, scroll, scrollTo, formInput, screenshot, where, setConfirm,
 };

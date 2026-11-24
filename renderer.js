@@ -38,8 +38,8 @@ function createTab(url = HOME, activate = true, focus = "page") {
   });
   const setTitle = (t) => { el.querySelector(".title").textContent = t || wv.getURL() || "새 탭"; el.title = t || ""; };
   wv.addEventListener("page-title-updated", (e) => setTitle(e.title));
-  wv.addEventListener("did-navigate", (e) => { if (activeId === id && e.url !== "about:blank") $("url").value = e.url; });
-  wv.addEventListener("did-navigate-in-page", (e) => { if (e.isMainFrame && activeId === id) $("url").value = e.url; });
+  wv.addEventListener("did-navigate", (e) => { if (activeId === id && e.url !== "about:blank") { $("url").value = e.url; updateStar(); } });
+  wv.addEventListener("did-navigate-in-page", (e) => { if (e.isMainFrame && activeId === id) { $("url").value = e.url; updateStar(); } });
   tabs.set(id, tab);
   if (activate || !activeId) activateTab(id, { focus });
   return tab;
@@ -58,6 +58,7 @@ function activateTab(id, { focus = "page" } = {}) {
   try { u = tab.view.getURL(); } catch {}
   $("url").value = u && u !== "about:blank" ? u : "";
   tab.el.scrollIntoView({ inline: "nearest" });
+  updateStar();
   // 키보드 입력이 보이는 탭으로 가게: 새 빈 탭이면 주소창, 아니면 페이지
   if (focus === "address") { $("url").focus(); $("url").select(); }
   else if (focus === "page") tab.view.focus();
@@ -98,6 +99,7 @@ window.api.onTabsShortcut((key) => {
   else if (key === "next") cycleTab(1);
   else if (key === "prev") cycleTab(-1);
   else if (key === "reload") view().reload();
+  else if (key === "bookmark") toggleBookmark();
 });
 // Ctrl+T / Ctrl+N / Ctrl+W / Ctrl+Tab / F5 는 앱 메뉴의 단축키로 처리 (main.js buildMenu)
 
@@ -153,6 +155,73 @@ function goFromAddressBar() {
   view().focus(); // 이동 후에는 페이지에서 바로 입력·스크롤할 수 있게
 }
 onEnterAfterIme($("url"), goFromAddressBar);
+// ---------- 북마크 ----------
+let bookmarks = [];
+const normUrl = (u) => String(u || "").replace(/\/$/, "");
+const currentUrl = () => { try { return view().getURL(); } catch { return ""; } };
+function updateStar() {
+  if (!activeId) return;
+  const on = bookmarks.some((b) => normUrl(b.url) === normUrl(currentUrl()));
+  const btn = $("bookmark");
+  btn.classList.toggle("on", on);
+  btn.textContent = on ? "★" : "☆";
+  btn.title = on ? "북마크 삭제 (Ctrl+D)" : "이 페이지 북마크 (Ctrl+D)";
+}
+function openBookmark(url, where) {
+  if (where === "newtab") createTab(url, true);
+  else if (where === "background") createTab(url, false);
+  else if (where === "newwindow") window.api.bookmarks.openWindow(url);
+  else { view().loadURL(url).catch(() => {}); view().focus(); }
+}
+function startRename(btn, b) {
+  const input = document.createElement("input");
+  input.className = "bm-edit";
+  input.value = b.title;
+  btn.replaceWith(input);
+  input.focus(); input.select();
+  let done = false;
+  const finish = async (save) => {
+    if (done) return; done = true;
+    if (save && input.value.trim()) bookmarks = await window.api.bookmarks.rename(b.url, input.value.trim());
+    renderBookmarks();
+  };
+  onEnterAfterIme(input, () => finish(true)); // 한글 이름도 끝 글자까지
+  input.addEventListener("keydown", (e) => { if (e.key === "Escape") finish(false); });
+  input.addEventListener("blur", () => finish(true));
+}
+function renderBookmarks() {
+  const bar = $("bookmarks");
+  bar.innerHTML = "";
+  for (const b of bookmarks) {
+    const btn = document.createElement("button");
+    btn.className = "bm";
+    btn.textContent = b.title;
+    btn.title = `${b.title}\n${b.url}\n(Ctrl+클릭: 새 탭 · 우클릭: 이름 바꾸기/삭제)`;
+    btn.onclick = (e) => openBookmark(b.url, e.ctrlKey || e.metaKey ? "background" : e.shiftKey ? "newwindow" : "here");
+    btn.onauxclick = (e) => { if (e.button === 1) openBookmark(b.url, "background"); };
+    btn.oncontextmenu = async (e) => {
+      e.preventDefault();
+      const action = await window.api.bookmarks.menu();
+      if (action === "newtab" || action === "newwindow") openBookmark(b.url, action);
+      else if (action === "remove") bookmarks = await window.api.bookmarks.remove(b.url), renderBookmarks(), updateStar();
+      else if (action === "rename") startRename(btn, b);
+    };
+    bar.appendChild(btn);
+  }
+}
+async function toggleBookmark() {
+  const url = currentUrl();
+  if (!/^https?:/i.test(url)) return;
+  const on = bookmarks.some((b) => normUrl(b.url) === normUrl(url));
+  let title = url;
+  try { title = view().getTitle() || url; } catch {}
+  bookmarks = on ? await window.api.bookmarks.remove(url) : await window.api.bookmarks.add(title, url);
+  renderBookmarks(); updateStar();
+}
+$("bookmark").onclick = toggleBookmark;
+window.api.bookmarks.onChanged((list) => { bookmarks = list; renderBookmarks(); updateStar(); });
+window.api.bookmarks.list().then((list) => { bookmarks = list; renderBookmarks(); updateStar(); });
+
 createTab(params.get("url") || HOME); // 새 창이 주소를 받아 열렸으면 그 주소로
 
 // 페이지에서 텍스트 추출 (블로그·카페처럼 iframe 안에 본문이 있는 경우도 포함)
