@@ -399,7 +399,8 @@ ipcMain.handle("bm:menu", (e) => new Promise((resolve) => {
 ipcMain.on("bm:open-window", (_e, url) => createWindow(url));
 
 // 크롬 북마크 가져오기: 크롬의 모든 프로필에 있는 Bookmarks 파일(JSON)을 읽어 중복 없이 추가
-function chromeBookmarkFiles() {
+function chromeBookmarkFiles() { return chromeProfileFiles("Bookmarks"); }
+function chromeProfileFiles(name) {
   const home = require("os").homedir();
   const roots = process.platform === "win32"
     ? [path.join(process.env.LOCALAPPDATA || path.join(home, "AppData", "Local"), "Google", "Chrome", "User Data")]
@@ -412,7 +413,7 @@ function chromeBookmarkFiles() {
     try { dirs = fs.readdirSync(root); } catch { continue; }
     for (const d of dirs) {
       if (d !== "Default" && !/^Profile \d+$/.test(d)) continue;
-      const f = path.join(root, d, "Bookmarks");
+      const f = path.join(root, d, name);
       if (fs.existsSync(f)) files.push(f);
     }
   }
@@ -443,14 +444,50 @@ function importChromeBookmarks() {
   if (added) saveBookmarks(list);
   return { files: files.length, found: found.length, added };
 }
-async function importChromeWithDialog(win) {
-  const r = importChromeBookmarks();
-  const message = !r.files ? "크롬 북마크를 찾지 못했습니다."
-    : r.added ? `크롬 북마크 ${r.added}개를 가져왔습니다.` : "새로 가져올 북마크가 없습니다.";
-  const detail = !r.files ? "이 컴퓨터에 크롬이 설치되어 있고, 크롬에 북마크가 있는지 확인해 주세요."
-    : `크롬 프로필 ${r.files}개에서 북마크 ${r.found}개를 찾았고, 이미 있는 ${r.found - r.added}개는 건너뛰었습니다.`;
-  if (win) await dialog.showMessageBox(win, { type: "info", title: "크롬 북마크 가져오기", message, detail, buttons: ["확인"], noLink: true });
-  return r;
+// 크롬 방문 기록 가져오기: 크롬의 History(SQLite)는 크롬이 켜져 있으면 잠겨 있을 수 있어 임시 복사본을 읽는다
+function importChromeHistory() {
+  const { DatabaseSync } = require("node:sqlite");
+  const files = chromeProfileFiles("History");
+  let found = 0, added = 0, failed = 0;
+  const h = loadHistory();
+  for (const f of files) {
+    const tmp = path.join(app.getPath("temp"), `chrome-history-${process.pid}-${Date.now()}.sqlite`);
+    try {
+      fs.copyFileSync(f, tmp);
+      const db = new DatabaseSync(tmp, { readOnly: true });
+      // 크롬 시간(1601-01-01부터 마이크로초)은 JavaScript 숫자 범위를 넘으므로 DB 안에서 밀리초(1970년 기준)로 바꿔 읽는다
+      const rows = db.prepare("SELECT url, title, visit_count, (last_visit_time / 1000 - 11644473600000) AS last_ms FROM urls WHERE hidden = 0 ORDER BY last_visit_time DESC LIMIT 5000").all();
+      db.close();
+      for (const r of rows) {
+        if (!/^https?:/i.test(r.url || "")) continue;
+        found++;
+        const last = Number(r.last_ms) || Date.now();
+        const e = h[r.url];
+        if (!e) { h[r.url] = { title: (r.title || "").slice(0, 120), visits: Number(r.visit_count) || 1, last }; added++; }
+        else { e.visits = Math.max(e.visits, Number(r.visit_count) || 0); e.last = Math.max(e.last, last); if (!e.title && r.title) e.title = r.title.slice(0, 120); }
+      }
+    } catch (err) {
+      failed++;
+      console.error("크롬 방문 기록을 읽지 못했습니다:", f, err.message);
+    } finally {
+      fs.rmSync(tmp, { force: true });
+    }
+  }
+  if (added) saveHistorySoon();
+  return { files: files.length, found, added, failed };
+}
+
+async function importChromeWithDialog(win, what = "all") {
+  const bm = what !== "history" ? importChromeBookmarks() : null;
+  const hi = what !== "bookmarks" ? importChromeHistory() : null;
+  const none = (!bm || !bm.files) && (!hi || !hi.files);
+  const lines = [];
+  if (bm && bm.files) lines.push(`북마크: ${bm.found}개 중 ${bm.added}개 새로 추가 (이미 있는 ${bm.found - bm.added}개 건너뜀)`);
+  if (hi && hi.files) lines.push(`방문 기록: ${hi.found.toLocaleString("ko-KR")}개 중 ${hi.added.toLocaleString("ko-KR")}개 새로 추가` + (hi.failed ? ` · 프로필 ${hi.failed}개는 읽지 못함(크롬을 닫고 다시 해 보세요)` : ""));
+  const message = none ? "크롬 데이터를 찾지 못했습니다." : "크롬에서 가져왔습니다.";
+  const detail = none ? "이 컴퓨터에 크롬이 설치되어 있는지 확인해 주세요." : lines.join("\n");
+  if (win) await dialog.showMessageBox(win, { type: "info", title: "크롬에서 가져오기", message, detail, buttons: ["확인"], noLink: true });
+  return { bookmarks: bm, history: hi };
 }
 ipcMain.handle("bm:import-chrome", (e) => importChromeWithDialog(BrowserWindow.fromWebContents(e.sender)));
 driver.setBookmarks({ list: loadBookmarks, add: addBookmark });
@@ -507,7 +544,8 @@ function buildMenu() {
       { label: "새 창", accelerator: "CmdOrCtrl+N", click: () => createWindow() },
       { label: "탭 닫기", accelerator: "CmdOrCtrl+W", click: shortcut("close") },
       { label: "이 페이지 북마크", accelerator: "CmdOrCtrl+D", click: shortcut("bookmark") },
-      { label: "크롬 북마크 가져오기", click: () => importChromeWithDialog(BrowserWindow.getFocusedWindow()) },
+      { label: "크롬 북마크·방문 기록 가져오기", click: () => importChromeWithDialog(BrowserWindow.getFocusedWindow(), "all") },
+      { label: "크롬 방문 기록만 가져오기", click: () => importChromeWithDialog(BrowserWindow.getFocusedWindow(), "history") },
       { label: "네이버 쇼핑 API 설정", click: () => openNaverApiSettings() },
       { label: "방문 기록 지우기", click: async () => {
         const w = BrowserWindow.getFocusedWindow();

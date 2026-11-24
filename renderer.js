@@ -243,8 +243,8 @@ function renderBookmarks() {
   }
   const imp = document.createElement("button"); // 맨 끝: 크롬 북마크 가져오기
   imp.className = "bm bm-import";
-  imp.textContent = "⤓ 크롬 북마크 가져오기";
-  imp.title = "크롬에 저장된 북마크를 모두 가져옵니다 (이미 있는 것은 건너뜀)";
+  imp.textContent = "⤓ 크롬에서 가져오기";
+  imp.title = "크롬의 북마크와 방문 기록을 가져옵니다 (이미 있는 것은 건너뜀). 방문 기록은 주소창 자동완성에 쓰입니다.";
   imp.onclick = () => window.api.bookmarks.importChrome();
   bar.appendChild(imp);
 }
