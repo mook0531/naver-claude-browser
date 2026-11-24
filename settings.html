@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'">
+<title>네이버 쇼핑 API 설정</title>
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.6 -apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; color: #222; background: #fff; }
+main { padding: 20px 22px; display: flex; flex-direction: column; gap: 14px; }
+h1 { font-size: 17px; margin: 0; }
+ol { margin: 0; padding-left: 20px; color: #444; }
+ol li { margin-bottom: 3px; }
+a { color: #b9563a; cursor: pointer; text-decoration: underline; }
+label { display: flex; flex-direction: column; gap: 4px; font-weight: 600; font-size: 13px; }
+input { font: inherit; font-weight: 400; padding: 7px 10px; border: 1px solid #ccd; border-radius: 6px; }
+.row { display: flex; gap: 8px; justify-content: flex-end; }
+button { font: inherit; cursor: pointer; border: 1px solid #ccd; background: #fff; border-radius: 6px; padding: 6px 14px; }
+button.primary { background: #d97757; border-color: #d97757; color: #fff; }
+#msg { min-height: 1.6em; font-size: 13px; }
+#msg.ok { color: #0a8a4b; } #msg.err { color: #b00; }
+.note { font-size: 12px; color: #777; }
+</style>
+</head>
+<body>
+<main>
+  <h1>네이버 쇼핑 API 설정</h1>
+  <ol>
+    <li><a id="open-dev">developers.naver.com</a>에 네이버 아이디로 로그인 → <b>Application → 애플리케이션 등록</b></li>
+    <li>사용 API에서 <b>검색</b>을 고르고, 환경 추가에서 <b>WEB 설정</b>을 고른 뒤 URL에 <b>http://localhost</b> 입력</li>
+    <li>등록 후 나오는 <b>Client ID</b>와 <b>Client Secret</b>을 아래에 붙여 넣기</li>
+  </ol>
+  <label>Client ID <input id="cid" autocomplete="off" spellcheck="false"></label>
+  <label>Client Secret <input id="secret" type="password" autocomplete="off" placeholder="저장된 값은 보이지 않습니다. 바꿀 때만 입력"></label>
+  <div id="msg"></div>
+  <div class="row">
+    <button id="test">연결 테스트</button>
+    <button id="save" class="primary">저장</button>
+  </div>
+  <p class="note">Secret은 이 컴퓨터에 암호화해서 저장됩니다. 하루 호출 한도는 25,000회입니다.</p>
+</main>
+<script src="settings.js"></script>
+</body>
+</html>
