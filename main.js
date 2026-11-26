@@ -45,7 +45,7 @@ const wins = new Map(); // BrowserWindow.id -> { win, no, activeTab, order: [tab
 let winSeq = 0;
 const HOME = "https://www.naver.com/";
 
-function createWindow(url) {
+function createWindow(url, { background = false } = {}) {
   // 일반 크롬처럼 보이도록 UA에서 Electron 표시 제거 (네이버가 PC 화면을 주도록)
   const ua = session.defaultSession.getUserAgent().replace(/\s?Electron\/\S+/, "").replace(/\s?naver-claude-browser\/\S+/, "");
   session.defaultSession.setUserAgent(ua);
@@ -59,6 +59,7 @@ function createWindow(url) {
     y: wa.y + shift,
     width,
     height: wa.height - shift,
+    show: !background, // Claude가 여는 창은 사용자의 작업을 가로채지 않게 포커스 없이 띄운다
     title: "네이버 + Claude 브라우저",
     autoHideMenuBar: true, // 메뉴 막대는 숨기고(Alt로 표시) 단축키만 사용
     icon: path.join(__dirname, "assets", process.platform === "win32" ? "icon.ico" : "icon.png"),
@@ -83,7 +84,8 @@ function createWindow(url) {
     }
   });
   win.loadFile(path.join(__dirname, "index.html"), { query: { win: String(info.no) } });
-  createTab(info, url || HOME, { activate: true, focus: "page" }); // 첫 탭은 바로 만든다
+  createTab(info, url || HOME, { activate: true, focus: background ? "none" : "page" }); // 첫 탭은 바로 만든다
+  if (background) win.showInactive();
   return info;
 }
 
@@ -102,7 +104,7 @@ ipcMain.handle("prefs:confirm:set", (_e, on) => {
 
 driver.setConfirm(async (message, detail) => {
   if (!confirmOn()) return true; // 확인 창 끔: 바로 진행
-  const t = tabMap.get(globalActive);
+  const t = tabMap.get(driver.currentTabId() || globalActive); // Claude가 작업 중인 탭의 창에 띄운다
   const win = (t && wins.get(t.winId) && wins.get(t.winId).win) || BrowserWindow.getAllWindows()[0];
   if (!win) return false;
   if (win.isMinimized()) win.restore();
@@ -276,10 +278,19 @@ driver.setTabs({
     .map(([id, t]) => ({ tab_id: id, window: wins.get(t.winId).no, title: t.wc.getTitle(), url: t.wc.getURL(), active: id === globalActive, shown: wins.get(t.winId).activeTab === id })),
   windowCount: () => allWins().length,
   windowNoOf: (id) => { const t = tabMap.get(id); return t && wins.get(t.winId) ? wins.get(t.winId).no : null; },
-  open: async (url) => { const info = currentWin(); if (!info) throw new Error("열린 브라우저 창이 없습니다."); const id = createTab(info, url || HOME); setGlobalActive(id); return id; },
-  switchTo: async (id) => { const info = winOfTab(id); activateTab(info, id); info.win.focus(); setGlobalActive(id); return id; },
+  // Claude가 연 탭·창은 사용자의 키보드 입력을 뺏지 않도록 포커스를 옮기지 않는다
+  open: async (url, nearId) => {
+    const t = nearId && tabMap.get(nearId);
+    const info = (t && wins.get(t.winId)) || currentWin();
+    if (!info) throw new Error("열린 브라우저 창이 없습니다.");
+    return createTab(info, url || HOME, { activate: true, focus: "none" });
+  },
+  switchTo: async (id) => { const info = winOfTab(id); activateTab(info, id, { focus: "none" }); return id; },
   close: async (id) => { closeTab(winOfTab(id), id); return id; },
-  openWindow: async (url) => { const info = createWindow(url); info.win.focus(); setGlobalActive(info.activeTab); return info.activeTab; },
+  openWindow: async (url) => createWindow(url, { background: true }).activeTab,
+  get: (id) => { const t = tabMap.get(id); return t && !t.wc.isDestroyed() && wins.has(t.winId) ? { wc: t.wc } : null; },
+  current: () => (tabMap.has(globalActive) ? globalActive : (currentWin() && currentWin().activeTab) || null),
+  activeOfWindowNo: (no) => { const w = [...wins.values()].find((x) => x.no === no); return w ? w.activeTab : null; },
 });
 
 // ---------- 방문 기록 (주소창 자동완성) ----------
@@ -647,8 +658,11 @@ if (!app.requestSingleInstanceLock()) {
     // Claude 데스크톱 앱이 이 브라우저를 조작할 수 있게 MCP 서버 시작
     startMcpServer({
       userDataDir: app.getPath("userData"),
-      onActivity: (label) => {
-        for (const w of BrowserWindow.getAllWindows()) w.webContents.send("mcp:activity", label);
+      // "Claude가 조작 중" 표시는 그 대화가 작업하는 창에만
+      onActivity: (label, tabId) => {
+        const t = tabId && tabMap.get(tabId), info = t && wins.get(t.winId);
+        if (info) sendTo(info, "mcp:activity", label);
+        else for (const w of allWins()) sendTo(w, "mcp:activity", label);
       },
     });
   });

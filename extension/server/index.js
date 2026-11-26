@@ -18,6 +18,8 @@ const appDataDir =
 const INFO_PATH = path.join(appDataDir, APP_NAME, "mcp.json");
 const log = (...a) => console.error("[naver-browser]", ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// 이 연결 다리 = Claude 대화 하나. 대화마다 브라우저에서 자기 작업 탭을 갖도록 식별자를 붙여 보낸다.
+const SESSION_ID = require("crypto").randomUUID();
 
 function readInfo() {
   try { return JSON.parse(fs.readFileSync(INFO_PATH, "utf8")); } catch { return null; }
@@ -64,6 +66,7 @@ async function forward(message) {
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
       Authorization: `Bearer ${info.token}`,
+      "X-Claude-Session": SESSION_ID,
     },
     body: JSON.stringify(message),
   });

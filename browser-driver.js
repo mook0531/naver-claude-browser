@@ -2,16 +2,59 @@
 // MCP 서버(mcp-server.js)가 이 함수들을 Claude의 도구로 노출한다.
 const MAX_TEXT = 40000; // 한 번에 Claude에게 돌려줄 페이지 글자 수 상한
 
-let wc = null;        // 지금 보고 있는 탭의 webContents
-let activeId = null;  // 그 탭의 id (예: tab-2)
+const { AsyncLocalStorage } = require("async_hooks");
+
+// 사용자가 지금 보고 있는 탭 (대화 정보가 없는 호출과 첫 연결에 쓰임)
+let wc = null;
+let activeId = null;
 let tabsApi = null;   // main.js가 넣어 주는 탭 목록/열기/전환/닫기
 const setActive = (id, contents) => { activeId = id; wc = contents; };
 const setTabs = (api) => { tabsApi = api; };
 let bmApi = null;     // main.js가 넣어 주는 북마크 목록/추가
 const setBookmarks = (api) => { bmApi = api; };
+
+// ---------- Claude 대화(세션)별 작업 탭 ----------
+// Claude 대화마다 자기 탭을 하나 갖는다. 도구 호출은 그 대화의 탭에서만 동작하므로 여러 대화가 동시에 써도 서로 섞이지 않는다.
+// 호출마다 AsyncLocalStorage에 { sid, id, wc }를 두고, 아래 함수들은 그 탭을 쓴다.
+const als = new AsyncLocalStorage();
+const sessions = new Map(); // sid -> { tabId, lastUsed }
+const IDLE_MS = 30 * 60 * 1000; // 30분 쓰지 않은 대화의 탭은 다른 대화가 써도 됨
+const ctx = () => als.getStore();
+const curId = () => (ctx() ? ctx().id : activeId);
+const currentTabId = curId;
+const otherSessionOn = (tabId, sid) => {
+  for (const [s, v] of sessions) if (s !== sid && v.tabId === tabId && Date.now() - v.lastUsed < IDLE_MS) return true;
+  return false;
+};
+function bindSession(id) {
+  const c = ctx();
+  if (!c || !c.sid) return;
+  const t = needTabs().get(id);
+  sessions.set(c.sid, { tabId: id, lastUsed: Date.now() });
+  c.id = id;
+  if (t) c.wc = t.wc;
+}
+// 대화의 탭 정하기: 이미 있으면 그대로, 처음이면 사용자가 보고 있는 탭, 그 탭을 다른 대화가 쓰고 있으면 새 창
+async function resolveSession(sid) {
+  if (!sid || !tabsApi) return null;
+  const s = sessions.get(sid);
+  if (s && tabsApi.get(s.tabId)) { s.lastUsed = Date.now(); return s.tabId; }
+  let id = tabsApi.current();
+  if (!id || !tabsApi.get(id) || otherSessionOn(id, sid)) id = await tabsApi.openWindow();
+  sessions.set(sid, { tabId: id, lastUsed: Date.now() });
+  return id;
+}
+function inSession(sid, tabId, fn) {
+  const t = tabId && tabsApi && tabsApi.get(tabId);
+  if (!sid || !t) return fn();
+  return als.run({ sid, id: tabId, wc: t.wc }, fn);
+}
+
 const ready = () => {
-  if (!wc || wc.isDestroyed()) throw new Error("브라우저 창이 열려 있지 않습니다. 네이버 + Claude 브라우저 앱을 실행하세요.");
-  return wc;
+  const c = ctx();
+  const w = c ? c.wc : wc;
+  if (!w || w.isDestroyed()) throw new Error(c ? "이 대화의 작업 탭이 닫혔습니다. 다시 요청하면 새 탭에서 이어서 합니다." : "브라우저 창이 열려 있지 않습니다. 네이버 + Claude 브라우저 앱을 실행하세요.");
+  return w;
 };
 // 앱이 막 켜졌을 때는 첫 탭이 준비될 때까지 잠깐 기다린다 (최대 15초)
 async function waitReady() {
@@ -41,8 +84,8 @@ function cap(text, label = "페이지") {
 const where = () => {
   const n = tabsApi ? tabsApi.list().length : 1;
   const w = tabsApi ? tabsApi.windowCount() : 1;
-  const winTag = w > 1 && tabsApi ? ` · 창 ${tabsApi.windowNoOf(activeId)}` : "";
-  return `현재 페이지 [${activeId || "tab"}${winTag}${n > 1 ? `, 탭 ${n}개${w > 1 ? `·창 ${w}개` : ""} 열림` : ""}]: ${ready().getTitle()} — ${ready().getURL()}`;
+  const winTag = w > 1 && tabsApi ? ` · 창 ${tabsApi.windowNoOf(curId())}` : "";
+  return `현재 페이지 [${curId() || "tab"}${winTag}${n > 1 ? `, 탭 ${n}개${w > 1 ? `·창 ${w}개` : ""} 열림` : ""}]: ${ready().getTitle()} — ${ready().getURL()}`;
 };
 
 // ---------- 페이지 안에서 실행되는 도우미 ----------
@@ -326,40 +369,62 @@ async function formInput(ref, value) {
 // ---------- 탭 ----------
 const needTabs = () => { if (!tabsApi) throw new Error("탭 기능을 쓸 수 없습니다."); return tabsApi; };
 function fmtTabs(list) {
+  const sid = ctx() && ctx().sid, mine = curId(), seen = tabsApi.current();
+  const mark = (t) => t.tab_id === mine ? "▶" : sid && otherSessionOn(t.tab_id, sid) ? "🤖" : t.tab_id === seen ? "👁" : " ";
   const byWin = new Map();
   for (const t of list) { if (!byWin.has(t.window)) byWin.set(t.window, []); byWin.get(t.window).push(t); }
   const many = byWin.size > 1;
   return [...byWin.entries()].sort((a, b) => a[0] - b[0]).map(([w, ts]) =>
-    (many ? `[창 ${w}]\n` : "") + ts.map((t) => `${t.active ? "▶" : t.shown && many ? "·" : " "} ${t.tab_id}: ${t.title || "(제목 없음)"} — ${t.url}`).join("\n")
+    (many ? `[창 ${w}]\n` : "") + ts.map((t) => `${mark(t)} ${t.tab_id}: ${t.title || "(제목 없음)"} — ${t.url}`).join("\n")
   ).join("\n");
 }
 const listTabs = async () => {
   const list = needTabs().list(), w = needTabs().windowCount();
-  return `열린 탭 ${list.length}개${w > 1 ? ` (창 ${w}개)` : ""} — ▶ = Claude가 지금 조작하는 탭${w > 1 ? ", · = 다른 창에서 화면에 보이는 탭" : ""}\n${fmtTabs(list)}`;
+  return `열린 탭 ${list.length}개${w > 1 ? ` (창 ${w}개)` : ""} — ▶ = 이 대화의 작업 탭, 👁 = 사용자가 지금 보고 있는 탭, 🤖 = 다른 Claude 대화가 쓰는 탭\n${fmtTabs(list)}`;
 };
+const checkUrl = (url) => {
+  if (!url) return url;
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) url = "https://" + url;
+  if (!/^https?:/i.test(url)) throw new Error("http/https 주소만 열 수 있습니다.");
+  return url;
+};
+const setGlobalIfNoSession = (id) => { if (!ctx()) { const t = needTabs().get(id); if (t) setActive(id, t.wc); } };
 async function newWindow(url) {
-  if (url) { if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) url = "https://" + url; if (!/^https?:/i.test(url)) throw new Error("http/https 주소만 열 수 있습니다."); }
-  const id = await needTabs().openWindow(url);
-  for (let i = 0; i < 50 && activeId !== id; i++) await sleep(100);
+  const id = await needTabs().openWindow(checkUrl(url));
+  bindSession(id); setGlobalIfNoSession(id);
   await settle(30000);
   return `새 창을 열었습니다 (${id}). ${where()}`;
 }
 async function newTab(url) {
-  if (url) { if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) url = "https://" + url; if (!/^https?:/i.test(url)) throw new Error("http/https 주소만 열 수 있습니다."); }
-  const id = await needTabs().open(url);
-  for (let i = 0; i < 50 && activeId !== id; i++) await sleep(100); // 새 탭으로 전환될 때까지
+  const id = await needTabs().open(checkUrl(url), curId()); // 이 대화의 탭이 있는 창에 연다
+  bindSession(id); setGlobalIfNoSession(id);
   await settle(30000);
   return `새 탭 ${id}을(를) 열었습니다. ${where()}`;
 }
 async function switchTab(id) {
   await needTabs().switchTo(id);
-  for (let i = 0; i < 50 && activeId !== id; i++) await sleep(100);
-  return `${id}(으)로 전환했습니다. ${where()}`;
+  const shared = ctx() && otherSessionOn(id, ctx().sid);
+  bindSession(id); setGlobalIfNoSession(id);
+  return `${id}(으)로 전환했습니다.${shared ? " (주의: 다른 Claude 대화도 이 탭을 쓰고 있습니다)" : ""} ${where()}`;
 }
 async function closeTab(id) {
-  await needTabs().close(id || activeId);
+  const target = id || curId();
+  const winNo = needTabs().windowNoOf(target);
+  await needTabs().close(target);
   await sleep(300);
-  return `${id || "현재 탭"}을(를) 닫았습니다.\n${await listTabs()}`;
+  if (target === curId()) {
+    const next = needTabs().activeOfWindowNo(winNo) || needTabs().current(); // 같은 창의 다음 탭으로
+    if (next) { bindSession(next); setGlobalIfNoSession(next); }
+  }
+  return `${target}을(를) 닫았습니다.\n${await listTabs()}`;
+}
+// 사용자가 "지금 보고 있는 이 화면"을 가리킬 때: 이 대화의 작업 탭을 사용자가 보고 있는 탭으로 바꾼다
+async function useCurrentTab() {
+  const id = needTabs().current();
+  if (!id) throw new Error("사용자가 보고 있는 탭을 찾지 못했습니다.");
+  const shared = ctx() && otherSessionOn(id, ctx().sid);
+  bindSession(id);
+  return `사용자가 보고 있는 탭(${id})으로 작업 대상을 바꿨습니다.${shared ? " (주의: 다른 Claude 대화도 이 탭을 쓰고 있습니다)" : ""} ${where()}`;
 }
 
 // ---------- 북마크 ----------
@@ -390,6 +455,6 @@ async function screenshot(region) {
 }
 
 module.exports = {
-  setActive, setTabs, setBookmarks, listBookmarks, addBookmark, waitReady, listTabs, newTab, newWindow, switchTab, closeTab, navigate, naverSearch, getPageText, readPage, find, click,
+  setActive, setTabs, setBookmarks, resolveSession, inSession, currentTabId, useCurrentTab, listBookmarks, addBookmark, waitReady, listTabs, newTab, newWindow, switchTab, closeTab, navigate, naverSearch, getPageText, readPage, find, click,
   typeText, pressKey, scroll, scrollTo, formInput, screenshot, where, setConfirm,
 };

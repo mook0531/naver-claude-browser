@@ -24,30 +24,47 @@ const INSTRUCTIONS =
   "네이버 개발자센터(developers.naver.com)에서는 사용자가 요청하면 애플리케이션 등록 양식을 채우고 등록할 수 있습니다. 약관 동의·본인 인증은 사용자가 직접 하게 하고, Client Secret은 절대 대화에 옮겨 적지 말고 사용자가 브라우저의 '네이버 쇼핑 API 설정' 창에 직접 붙여 넣게 안내하세요. " +
   "그 밖의 사이트에서는 글쓰기·설정 변경을 하지 마세요. 사람이 보는 속도로 필요한 만큼만 읽고, 대량 수집은 하지 마세요. " +
   "요소를 누를 때는 read_page나 find로 받은 ref 번호를 쓰는 것이 좌표보다 정확합니다. 지도처럼 글자로 읽히지 않는 화면만 screenshot을 쓰세요. " +
-  "브라우저에는 여러 창과 탭이 있을 수 있습니다. 모든 도구는 지금 조작 중인 탭(결과의 [tab-N])에서 동작하며, 사용자가 다른 창이나 탭을 누르면 그쪽으로 바뀝니다. 탭 번호는 모든 창에서 겹치지 않습니다. 여러 페이지를 비교할 때는 new_tab으로 열고 switch_tab으로 오가세요. " +
+  "브라우저에는 여러 창과 탭이 있을 수 있고, 여러 Claude 대화가 동시에 쓸 수 있습니다. 이 대화는 자기 작업 탭(결과의 [tab-N])에서만 동작하며, 다른 대화의 탭(list_tabs의 🤖)은 건드리지 마세요. " +
+  "처음에는 사용자가 보고 있는 탭에서 시작하고, 그 탭을 다른 대화가 쓰고 있으면 새 창이 열립니다. 사용자가 '지금 보는 화면'을 말하면 use_current_tab을 먼저 쓰세요. 여러 페이지를 비교할 때는 new_tab으로 열고 switch_tab으로 오가세요. " +
   "사용자가 열어 둔 탭은 닫지 말고, 작업용으로 연 탭만 필요 없을 때 닫으세요. ref 번호는 탭마다 따로입니다.";
 
-// 도구 호출은 한 번에 하나씩 (같은 화면을 동시에 조작하지 않도록)
-let queue = Promise.resolve();
-const serial = (fn) => { const p = queue.then(fn, fn); queue = p.catch(() => {}); return p; };
+// 같은 탭은 한 번에 하나씩 조작하고, 다른 탭(다른 Claude 대화)은 동시에 진행한다
+const locks = new Map();
+function lockOn(key, fn) {
+  const prev = locks.get(key) || Promise.resolve();
+  const p = prev.then(fn, fn);
+  const tail = p.catch(() => {});
+  locks.set(key, tail);
+  tail.then(() => { if (locks.get(key) === tail) locks.delete(key); });
+  return p;
+}
 
-function buildServer(onActivity) {
+// sid: Claude 대화(세션)마다 연결 다리가 붙여 보내는 식별자. 없으면(예전 연결 방식) 사용자가 보는 탭에서 한 번에 하나씩.
+function buildServer(onActivity, sid) {
   const server = new McpServer({ name: "naver-browser", version: "1.0.0" }, { instructions: INSTRUCTIONS });
 
   const tool = (name, description, inputSchema, label, fn, readOnly = false) =>
-    server.registerTool(name, { description, inputSchema, annotations: { readOnlyHint: readOnly, openWorldHint: true } }, (args) =>
-      serial(async () => {
-        onActivity(label(args || {}));
+    server.registerTool(name, { description, inputSchema, annotations: { readOnlyHint: readOnly, openWorldHint: true } }, async (args) => {
+      args = args || {};
+      let tabId = null;
+      try {
+        await b.waitReady().catch(() => {}); // 앱이 막 켜졌으면 첫 탭 준비를 잠깐 기다림
+        tabId = sid ? await lockOn("resolve", () => b.resolveSession(sid)) : null; // 이 대화의 작업 탭
+      } catch (e) {
+        return { isError: true, content: [{ type: "text", text: "오류: " + (e.message || e) }] };
+      }
+      return lockOn(tabId || "global", () => b.inSession(sid, tabId, async () => {
+        onActivity(label(args), tabId);
         try {
-          await b.waitReady().catch(() => {}); // 앱이 막 켜졌으면 첫 탭 준비를 잠깐 기다림
-          const out = await fn(args || {});
+          const out = await fn(args);
           return typeof out === "string" ? { content: [{ type: "text", text: out }] } : out;
         } catch (e) {
           return { isError: true, content: [{ type: "text", text: "오류: " + (e.message || e) }] };
         } finally {
-          onActivity(null);
+          onActivity(null, b.currentTabId() || tabId);
         }
       }));
+    });
 
   tool("naver_search",
     "네이버에서 검색하고 결과 페이지의 글을 돌려줍니다. 네이버 검색이 필요하면 항상 이 도구를 쓰세요. " +
@@ -121,6 +138,11 @@ function buildServer(onActivity) {
       ],
     }), true);
 
+  tool("use_current_tab",
+    "사용자가 '지금 보고 있는 화면/이 페이지'를 가리키면 먼저 이 도구로 작업 대상을 사용자가 보고 있는 탭으로 바꾸세요. " +
+    "(이 대화는 보통 자기 작업 탭에서 일하므로, 사용자가 다른 탭을 보고 있을 수 있습니다)", {},
+    () => "👁 사용자가 보는 탭으로", () => b.useCurrentTab(), true);
+
   tool("list_tabs", "열린 탭 목록(tab_id, 제목, 주소)과 지금 보고 있는 탭을 돌려줍니다.", {},
     () => "🗂 탭 목록", () => b.listTabs(), true);
 
@@ -168,7 +190,8 @@ function startMcpServer({ userDataDir, onActivity = () => {} }) {
 
     // 요청마다 새 서버/전송 객체 (상태 없는 방식)
     const port = httpServer.address().port;
-    const server = buildServer(onActivity);
+    const sid = String(req.headers["x-claude-session"] || "").slice(0, 80) || null;
+    const server = buildServer(onActivity, sid);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
