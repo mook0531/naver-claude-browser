@@ -190,6 +190,8 @@ function createTab(info, url = HOME, { activate = true, focus = "page", index } 
   }
   // 방문 기록 (주소창 자동완성용)
   wc.on("did-navigate", (_e, u) => recordVisit(u, ""));
+  // 사이트 아이콘 (북마크 막대·메뉴용): 사이트(origin)별로 실제 아이콘 주소를 기억
+  wc.on("page-favicon-updated", (_e, icons) => { try { if (icons && icons[0]) rememberFavicon(new URL(wc.getURL()).origin, icons[0]); } catch {} });
   wc.on("page-title-updated", (_e, title) => recordVisit(wc.getURL(), title, false));
   // 페이지 안 Ctrl+클릭 등으로 생긴 포커스 이동 시 Claude 대상도 맞춘다
   wc.on("focus", () => { if (info.activeTab === id) setGlobalActive(id); });
@@ -397,12 +399,30 @@ function folderMenuTemplate(win, node) {
   return items;
 }
 ipcMain.handle("bm:list", () => bm.load());
+
+// 사이트 아이콘 저장 (favicons.json: origin -> 아이콘 주소)
+const favPath = () => path.join(app.getPath("userData"), "favicons.json");
+let favicons = null, favTimer = null;
+const loadFavicons = () => { if (!favicons) { try { favicons = JSON.parse(fs.readFileSync(favPath(), "utf8")); } catch { favicons = {}; } } return favicons; };
+function rememberFavicon(origin, iconUrl) {
+  if (!/^https?:/i.test(origin) || !/^(https?:|data:image\/)/i.test(iconUrl) || iconUrl.length > 4000) return;
+  const f = loadFavicons();
+  if (f[origin] === iconUrl) return;
+  f[origin] = iconUrl;
+  clearTimeout(favTimer);
+  favTimer = setTimeout(() => {
+    fs.mkdirSync(path.dirname(favPath()), { recursive: true });
+    fs.writeFileSync(favPath(), JSON.stringify(f));
+    for (const w of allWins()) sendTo(w, "favicons:changed", f);
+  }, 800);
+}
+ipcMain.handle("favicons:get", () => loadFavicons());
 ipcMain.handle("bm:add", (_e, title, url, folderId) => bm.add(title, url, folderId || null));
 ipcMain.handle("bm:remove", (_e, id) => bm.remove(id));
 ipcMain.handle("bm:remove-url", (_e, url) => bm.removeUrl(url));
 ipcMain.handle("bm:rename", (_e, id, title) => bm.rename(id, title));
 ipcMain.handle("bm:new-folder", (_e, title, parentId) => bm.addFolder(title, parentId || null));
-ipcMain.handle("bm:move", (_e, id, folderId) => bm.move(id, folderId || null));
+ipcMain.handle("bm:move", (_e, id, folderId, index) => bm.move(id, folderId || null, typeof index === "number" ? index : null));
 ipcMain.on("bm:open", (e, url, mode) => openBookmarkIn(BrowserWindow.fromWebContents(e.sender), url, mode));
 ipcMain.on("bm:open-window", (_e, url) => createWindow(url));
 
@@ -465,7 +485,9 @@ ipcMain.handle("bm:bar-menu", (e) => new Promise((resolve) => {
   let picked = null;
   Menu.buildFromTemplate([
     { label: "새 폴더…", click: () => { picked = { action: "newfolder", parentId: null }; } },
-    { label: "크롬에서 가져오기", click: () => importChromeWithDialog(win) },
+    { label: "크롬에서 북마크·방문 기록 가져오기", click: () => importChromeWithDialog(win) },
+    { type: "separator" },
+    { label: "북마크 막대 숨기기 (Ctrl+Shift+B)", click: () => { picked = { action: "hidebar" }; } },
   ]).popup({ window: win, callback: () => setTimeout(() => resolve(picked), 0) });
 }));
 
@@ -638,6 +660,7 @@ function buildMenu() {
       { label: "다음 탭", accelerator: "Ctrl+Tab", click: shortcut("next") },
       { label: "이전 탭", accelerator: "Ctrl+Shift+Tab", click: shortcut("prev") },
       { label: "대화창 열기/접기", accelerator: "CmdOrCtrl+Shift+L", click: shortcut("panel") },
+      { label: "북마크 막대 표시/숨기기", accelerator: "CmdOrCtrl+Shift+B", click: shortcut("bookmarkbar") },
       { label: "새로고침", accelerator: "F5", click: shortcut("reload") },
       { type: "separator" },
       { role: "zoomIn", label: "확대" }, { role: "zoomOut", label: "축소" }, { role: "resetZoom", label: "원래 크기" },

@@ -17,19 +17,27 @@ const clean = (t, max = 80) => String(t || "").trim().slice(0, max);
 
 function createStore(filePath, onChange = () => {}) {
   // 예전 형식([{title,url}])도 읽고, 모든 항목에 id를 붙인다
+  let fixed = false; // id를 새로 붙였거나 형식을 바꿨으면 true → 바로 저장해 id가 매번 바뀌지 않게
   function normalize(list) {
     return (Array.isArray(list) ? list : []).map((n) => {
-      if (!n || typeof n !== "object") return null;
+      if (!n || typeof n !== "object") { fixed = true; return null; }
+      if (!n.id || !n.type) fixed = true;
       if (n.type === "folder" || Array.isArray(n.children)) {
         return { id: n.id || newId(), type: "folder", title: clean(n.title) || "새 폴더", children: normalize(n.children) };
       }
-      if (!/^https?:/i.test(n.url || "")) return null;
+      if (!/^https?:/i.test(n.url || "")) { fixed = true; return null; }
       return { id: n.id || newId(), type: "url", title: clean(n.title) || n.url, url: n.url };
     }).filter(Boolean);
   }
   function load() {
-    try { return normalize(JSON.parse(fs.readFileSync(filePath(), "utf8"))); }
-    catch { return normalize(DEFAULTS); }
+    fixed = false;
+    let tree;
+    try { tree = normalize(JSON.parse(fs.readFileSync(filePath(), "utf8"))); }
+    catch { tree = normalize(DEFAULTS); fixed = true; }
+    if (fixed) { // 새로 붙인 id를 파일에 남긴다 (그래야 화면과 저장소의 id가 같음)
+      try { fs.mkdirSync(path.dirname(filePath()), { recursive: true }); fs.writeFileSync(filePath(), JSON.stringify(tree, null, 2)); } catch {}
+    }
+    return tree;
   }
   function save(tree) {
     fs.mkdirSync(path.dirname(filePath()), { recursive: true });
@@ -137,16 +145,19 @@ function createStore(filePath, onChange = () => {}) {
       save(tree);
       return tree;
     },
-    // 다른 폴더로 옮기기 (folderId 없으면 북마크 막대). 폴더를 자기 안으로 옮기는 것은 막는다.
-    move(id, folderId = null) {
+    // 옮기기: folderId 폴더(없으면 북마크 막대)의 index 위치에 (index 없으면 맨 끝). 끌어서 순서 바꾸기에도 쓴다.
+    // 폴더를 자기 안으로 옮기는 것은 막는다.
+    move(id, folderId = null, index = null) {
       const tree = load(), f = findId(tree, id);
       if (!f) return tree;
       if (folderId && f.node.type === "folder" && (folderId === id || find(f.node.children, (n) => n.id === folderId))) {
         throw new Error("폴더를 자기 안으로 옮길 수 없습니다.");
       }
       const dest = childrenOf(tree, folderId);
+      let at = typeof index === "number" ? Math.max(0, Math.min(index, dest.length)) : dest.length;
+      if (dest === f.parent && f.index < at) at--; // 같은 목록 안에서 뒤로 옮기면 빠진 자리만큼 당겨짐
       f.parent.splice(f.index, 1);
-      dest.push(f.node);
+      dest.splice(at, 0, f.node);
       save(tree);
       return tree;
     },

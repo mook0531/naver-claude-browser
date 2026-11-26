@@ -63,6 +63,7 @@ window.api.onConfirmChanged(showConfirm);
 $("confirm-toggle").onclick = async () => showConfirm(await window.api.setConfirm(!$("confirm-toggle").classList.contains("on")));
 window.api.onTabsShortcut((key) => {
   if (key === "bookmark") toggleBookmark();
+  else if (key === "bookmarkbar") setBookmarkBar(document.body.classList.contains("bm-hidden"));
   else if (key === "panel") togglePanel();
 });
 // Ctrl+T / Ctrl+N / Ctrl+W / Ctrl+Tab / F5 는 앱 메뉴 단축키로 main에서 처리
@@ -188,12 +189,17 @@ urlBox.addEventListener("keydown", (e) => {
 });
 urlBox.addEventListener("blur", () => setTimeout(closeSuggest, 120));
 urlBox.addEventListener("focus", () => urlBox.select());
-// ---------- 북마크 (크롬처럼 폴더) ----------
-// bookmarks = 트리. 맨 위 배열 = 북마크 막대. 폴더 펼침·우클릭 메뉴는 main이 크롬처럼 띄운다.
+// ---------- 북마크 (크롬처럼: 아이콘, 폴더 펼침 메뉴, » 넘침, 끌어서 옮기기) ----------
+// bookmarks = 트리. 맨 위 배열 = 북마크 막대. "기타 북마크"·"모바일 북마크" 폴더는 크롬처럼 오른쪽 끝에.
 let bookmarks = [];
+let favMap = {};
 const bmApi = window.api.bookmarks;
+const RIGHT_FOLDERS = ["기타 북마크", "모바일 북마크"];
 const normUrl = (u) => String(u || "").replace(/\/$/, "");
 const currentUrl = () => activeTab().url || "";
+const GLOBE = "data:image/svg+xml;utf8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="none" stroke="#5f6368" stroke-width="1.3"/><path d="M1.5 8h13M8 1.5c2 2 2 11 0 13M8 1.5c-2 2-2 11 0 13" fill="none" stroke="#5f6368" stroke-width="1.1"/></svg>');
+const FOLDER_SVG = '<svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.5 1.5h7.3v7.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" fill="none" stroke="#5f6368" stroke-width="1.3" stroke-linejoin="round"/></svg>';
+
 function findBookmarkByUrl(list, url) {
   for (const n of list) {
     if (n.type === "url" && normUrl(n.url) === normUrl(url)) return n;
@@ -201,6 +207,16 @@ function findBookmarkByUrl(list, url) {
   }
   return null;
 }
+// 항목의 위치: { node, parentId(null=막대), index, list }
+function locate(id, list = bookmarks, parentId = null) {
+  for (let i = 0; i < list.length; i++) {
+    const n = list[i];
+    if (n.id === id) return { node: n, parentId, index: i, list };
+    if (n.type === "folder") { const r = locate(id, n.children, n.id); if (r) return r; }
+  }
+  return null;
+}
+const countUrls = (n) => n.type === "url" ? 1 : n.children.reduce((s, c) => s + countUrls(c), 0);
 function updateStar() {
   if (!state.activeId) return;
   const on = !!findBookmarkByUrl(bookmarks, currentUrl());
@@ -210,31 +226,48 @@ function updateStar() {
   btn.title = on ? "북마크 수정·삭제 (Ctrl+D)" : "이 페이지 북마크 (Ctrl+D)";
 }
 const below = (el) => { const r = el.getBoundingClientRect(); return [r.left, r.bottom + 2]; };
+function iconFor(node) {
+  if (node.type === "folder") { const s = document.createElement("span"); s.innerHTML = FOLDER_SVG; return s.firstChild; }
+  const img = document.createElement("img");
+  img.className = "ico";
+  let origin = "";
+  try { origin = new URL(node.url).origin; } catch {}
+  img.src = favMap[origin] || (origin ? origin + "/favicon.ico" : GLOBE);
+  img.onerror = () => { img.onerror = null; img.src = GLOBE; };
+  return img;
+}
+const modeOf = (e) => (e.ctrlKey || e.metaKey || e.button === 1 ? "background" : e.shiftKey ? "newwindow" : "here");
 
-// 이름 입력 창 (페이지가 위에 덮여 있어서, 열린 동안 페이지를 그림으로 바꿔 보여준다)
+// ---- 페이지 위에 HTML을 띄울 때: 페이지를 그림으로 바꿔 보여줌 (여러 곳이 함께 써도 되게 횟수로 관리) ----
+let overlayCount = 0;
+async function overlayOn() {
+  if (overlayCount++ > 0) return;
+  const shot = await window.api.overlay(true);
+  if (overlayCount > 0) $("views").style.backgroundImage = shot ? `url("${shot}")` : "";
+}
+function overlayOff() {
+  if (overlayCount === 0 || --overlayCount > 0) return;
+  window.api.overlay(false).then(() => { if (overlayCount === 0) $("views").style.backgroundImage = ""; });
+}
+
+// ---- 이름 입력 창 ----
 function askName(title, value = "") {
   return new Promise(async (resolve) => {
-    const shot = await window.api.overlay(true);
-    $("views").style.backgroundImage = shot ? `url("${shot}")` : "";
+    closeMenus();
+    await overlayOn();
     const box = $("modal"), input = $("modal-input");
     $("modal-title").textContent = title;
     input.value = value;
     box.hidden = false;
     input.focus(); input.select();
     let done = false;
-    const finish = (v) => {
-      if (done) return; done = true;
-      box.hidden = true;
-      window.api.overlay(false).then(() => { $("views").style.backgroundImage = ""; });
-      resolve(v);
-    };
+    const finish = (v) => { if (done) return; done = true; box.hidden = true; overlayOff(); resolve(v); };
     onEnterAfterIme(input, () => finish(input.value.trim() || null)); // 한글 이름도 끝 글자까지
     input.onkeydown = (e) => { if (e.key === "Escape") finish(null); };
     $("modal-ok").onclick = () => finish(input.value.trim() || null);
     $("modal-cancel").onclick = () => finish(null);
   });
 }
-// main이 돌려준 "이름이 필요한 동작" 처리
 async function handleBmAction(act) {
   if (!act) return;
   if (act.action === "rename") {
@@ -246,41 +279,189 @@ async function handleBmAction(act) {
   } else if (act.action === "newfolder-move") {
     const name = await askName("새 폴더 이름 (이 북마크를 넣을 폴더)", "새 폴더");
     if (name) { const fid = await bmApi.newFolder(name, null); await bmApi.move(act.id, fid); }
-  }
+  } else if (act.action === "hidebar") setBookmarkBar(false);
+}
+async function contextFor(id, e) {
+  e.preventDefault(); e.stopPropagation();
+  const act = await bmApi.menu(id);
+  closeMenus();
+  handleBmAction(act);
 }
 
+// ---- 끌어서 옮기기 ----
+let dragId = null, hoverOpenTimer = null;
+function clearDropMarks() { document.querySelectorAll(".drop-before,.drop-after,.drop-into").forEach((el) => el.classList.remove("drop-before", "drop-after", "drop-into")); }
+// el: 대상 요소, node: 대상 항목, vertical: 메뉴 안(위·아래)이면 true, 막대(좌·우)면 false
+function makeDraggable(el, node, vertical) {
+  el.draggable = true;
+  el.addEventListener("dragstart", (e) => { dragId = node.id; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", node.type === "url" ? node.url : node.title); el.classList.add("dragging"); });
+  el.addEventListener("dragend", () => { dragId = null; el.classList.remove("dragging"); clearDropMarks(); clearTimeout(hoverOpenTimer); });
+  el.addEventListener("dragover", (e) => {
+    if (!dragId || dragId === node.id) return;
+    e.preventDefault(); e.stopPropagation();
+    const r = el.getBoundingClientRect();
+    const t = vertical ? (e.clientY - r.top) / r.height : (e.clientX - r.left) / r.width;
+    const where = node.type === "folder" && t > 0.25 && t < 0.75 ? "into" : t < 0.5 ? "before" : "after";
+    if (!el.classList.contains("drop-" + where)) {
+      clearDropMarks(); el.classList.add("drop-" + where);
+      clearTimeout(hoverOpenTimer);
+      // 끌고 가다 폴더 위에 잠깐 있으면 펼침 (크롬처럼)
+      if (where === "into") hoverOpenTimer = setTimeout(() => openFolderMenu(node.id, el, vertical ? "side" : "below", vertical ? menuLevelOf(el) + 1 : 0), 600);
+    }
+  });
+  el.addEventListener("dragleave", () => { el.classList.remove("drop-before", "drop-after", "drop-into"); });
+  el.addEventListener("drop", async (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const id = dragId; dragId = null;
+    const where = el.classList.contains("drop-into") ? "into" : el.classList.contains("drop-before") ? "before" : "after";
+    clearDropMarks(); clearTimeout(hoverOpenTimer);
+    if (!id) return;
+    try {
+      if (where === "into") await bmApi.move(id, node.id, null);
+      else { const loc = locate(node.id); await bmApi.move(id, loc.parentId, loc.index + (where === "after" ? 1 : 0)); }
+    } catch (err) { /* 폴더를 자기 안으로 옮기는 경우 등은 무시 */ }
+  });
+}
+
+// ---- 폴더 펼침 메뉴 (HTML, 크롬처럼 아이콘·하위 폴더 옆으로 펼침) ----
+const menus = []; // [{ el, key }]
+const menuLevelOf = (el) => { const m = el.closest(".bm-menu"); return m ? Number(m.dataset.level) : -1; };
+function closeMenus(fromLevel = 0) {
+  while (menus.length > fromLevel) { menus.pop().el.remove(); }
+  if (fromLevel === 0 && menuOverlay) { menuOverlay = false; overlayOff(); }
+}
+let menuOverlay = false;
+// key: 폴더 id 또는 "overflow"(» 버튼). where: below(막대 아래) | side(옆으로)
+async function openFolderMenu(key, anchor, where = "below", level = 0) {
+  if (menus[level] && menus[level].key === key) return;
+  closeMenus(level);
+  if (!menuOverlay) { menuOverlay = true; overlayOn(); }
+  const items = key === "overflow" ? overflowItems : (locate(key) || {}).node?.children || [];
+  const m = document.createElement("div");
+  m.className = "bm-menu";
+  m.dataset.level = level;
+  for (const n of items) {
+    const row = document.createElement("div");
+    row.className = "bm-row" + (n.type === "folder" ? " is-folder" : "");
+    row.title = n.type === "url" ? `${n.title}\n${n.url}` : n.title;
+    const label = document.createElement("span"); label.className = "t"; label.textContent = n.title;
+    row.append(iconFor(n), label);
+    if (n.type === "folder") {
+      const arrow = document.createElement("span"); arrow.className = "arrow"; arrow.textContent = "›"; row.append(arrow);
+      let t = null;
+      row.addEventListener("mouseenter", () => { t = setTimeout(() => openFolderMenu(n.id, row, "side", level + 1), 180); });
+      row.addEventListener("mouseleave", () => clearTimeout(t));
+      row.addEventListener("click", () => openFolderMenu(n.id, row, "side", level + 1));
+    } else {
+      row.addEventListener("mouseenter", () => { if (menus.length > level + 1) closeMenus(level + 1); });
+      row.addEventListener("click", (e) => { closeMenus(); bmApi.open(n.url, modeOf(e)); });
+      row.addEventListener("auxclick", (e) => { if (e.button === 1) { closeMenus(); bmApi.open(n.url, "background"); } });
+    }
+    row.addEventListener("contextmenu", (e) => contextFor(n.id, e));
+    makeDraggable(row, n, true);
+    m.appendChild(row);
+  }
+  if (!items.length) { const empty = document.createElement("div"); empty.className = "bm-row empty"; empty.textContent = "(비어 있음)"; m.appendChild(empty); }
+  // 빈 곳에 놓으면 이 폴더 맨 끝으로
+  m.addEventListener("dragover", (e) => { if (dragId && key !== "overflow") e.preventDefault(); });
+  m.addEventListener("drop", async (e) => { e.preventDefault(); const id = dragId; dragId = null; clearDropMarks(); if (id && key !== "overflow" && id !== key) { try { await bmApi.move(id, key, null); } catch {} } });
+  const total = key === "overflow" ? items.filter((n) => n.type === "url").length : items.reduce((s, c) => s + countUrls(c), 0);
+  if (total) {
+    const sep = document.createElement("div"); sep.className = "bm-sep"; m.appendChild(sep);
+    const all = document.createElement("div"); all.className = "bm-row"; all.textContent = `모두 새 탭으로 열기 (${total}개)`;
+    all.addEventListener("click", () => {
+      const urls = []; const walk = (l) => l.forEach((x) => (x.type === "url" ? urls.push(x.url) : walk(x.children)));
+      walk(key === "overflow" ? items.filter((n) => n.type === "url") : items);
+      closeMenus();
+      urls.slice(0, 30).forEach((u, i) => bmApi.open(u, i === 0 ? "newtab" : "background"));
+    });
+    m.appendChild(all);
+  }
+  document.body.appendChild(m);
+  // 위치: 막대 아래 또는 옆. 창 밖으로 나가면 반대쪽으로.
+  const a = anchor.getBoundingClientRect(), mw = m.offsetWidth, vw = window.innerWidth, vh = window.innerHeight;
+  let left = where === "below" ? a.left : a.right - 4, top = where === "below" ? a.bottom + 2 : a.top - 6;
+  if (left + mw > vw - 8) left = where === "below" ? Math.max(8, vw - mw - 8) : Math.max(8, a.left - mw + 4);
+  m.style.left = left + "px";
+  m.style.top = top + "px";
+  m.style.maxHeight = Math.max(120, vh - top - 12) + "px";
+  menus[level] = { el: m, key };
+}
+document.addEventListener("mousedown", (e) => { if (menus.length && !e.target.closest(".bm-menu") && !e.target.closest("#bookmarks")) closeMenus(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && menus.length) closeMenus(); });
+
+// ---- 북마크 막대 ----
+let overflowItems = [];
+function barButton(n) {
+  const btn = document.createElement("button");
+  btn.className = "bm" + (n.type === "folder" ? " bm-folder" : "");
+  const label = document.createElement("span"); label.className = "t"; label.textContent = n.title;
+  btn.append(iconFor(n), label);
+  if (n.type === "folder") {
+    btn.title = n.title;
+    btn.onclick = () => (menus[0] && menus[0].key === n.id ? closeMenus() : openFolderMenu(n.id, btn, "below", 0));
+    // 메뉴가 열린 상태에서 다른 폴더로 마우스를 옮기면 그 폴더가 열림 (크롬처럼)
+    btn.onmouseenter = () => { if (menus.length && menus[0].key !== n.id && !dragId) openFolderMenu(n.id, btn, "below", 0); };
+  } else {
+    btn.title = `${n.title}\n${n.url}`;
+    btn.onclick = (e) => bmApi.open(n.url, modeOf(e));
+    btn.onauxclick = (e) => { if (e.button === 1) bmApi.open(n.url, "background"); };
+  }
+  btn.oncontextmenu = (e) => contextFor(n.id, e);
+  makeDraggable(btn, n, false);
+  return btn;
+}
 function renderBookmarks() {
   const bar = $("bookmarks");
   bar.innerHTML = "";
-  for (const b of bookmarks) {
-    const btn = document.createElement("button");
-    btn.className = "bm" + (b.type === "folder" ? " bm-folder" : "");
-    if (b.type === "folder") {
-      btn.textContent = "📁 " + b.title;
-      btn.title = `${b.title} (클릭: 펼치기 · 우클릭: 이름 바꾸기·이동·삭제)`;
-      btn.onclick = () => bmApi.folderPopup(b.id, ...below(btn));
-    } else {
-      btn.textContent = b.title;
-      btn.title = `${b.title}\n${b.url}\n(Ctrl+클릭: 새 탭 · 우클릭: 이름 바꾸기·폴더로 이동·삭제)`;
-      btn.onclick = (e) => bmApi.open(b.url, e.ctrlKey || e.metaKey ? "background" : e.shiftKey ? "newwindow" : "here");
-      btn.onauxclick = (e) => { if (e.button === 1) bmApi.open(b.url, "background"); };
-    }
-    btn.oncontextmenu = async (e) => { e.preventDefault(); e.stopPropagation(); handleBmAction(await bmApi.menu(b.id)); };
-    bar.appendChild(btn);
-  }
-  const imp = document.createElement("button"); // 맨 끝: 크롬에서 가져오기
-  imp.className = "bm bm-import";
-  imp.textContent = "⤓ 크롬에서 가져오기";
-  imp.title = "크롬의 북마크(폴더 구조 그대로)와 방문 기록을 가져옵니다 (이미 있는 것은 건너뜀). 방문 기록은 주소창 자동완성에 쓰입니다.";
-  imp.onclick = () => bmApi.importChrome();
-  bar.appendChild(imp);
+  const main = document.createElement("div"); main.id = "bm-items";
+  const chev = document.createElement("button"); chev.id = "bm-chevron"; chev.className = "bm"; chev.textContent = "»"; chev.title = "다른 북마크"; chev.hidden = true;
+  chev.onclick = () => (menus[0] && menus[0].key === "overflow" ? closeMenus() : openFolderMenu("overflow", chev, "below", 0));
+  const right = document.createElement("div"); right.id = "bm-right";
+  const barItems = bookmarks.filter((n) => !(n.type === "folder" && RIGHT_FOLDERS.includes(n.title)));
+  for (const n of barItems) main.appendChild(barButton(n));
+  for (const n of bookmarks.filter((n) => n.type === "folder" && RIGHT_FOLDERS.includes(n.title))) right.appendChild(barButton(n));
+  if (!bookmarks.length) { const hint = document.createElement("span"); hint.className = "bm-hint"; hint.textContent = "북마크를 추가하려면 ☆(Ctrl+D)을 누르세요"; main.appendChild(hint); }
+  bar.append(main, chev, right);
+  // 빈 곳에 놓으면 막대 맨 끝으로
+  main.addEventListener("dragover", (e) => { if (dragId) e.preventDefault(); });
+  main.addEventListener("drop", async (e) => { if (e.target !== main) return; e.preventDefault(); const id = dragId; dragId = null; clearDropMarks(); if (id) { try { await bmApi.move(id, null, null); } catch {} } });
+  layoutBar();
 }
-// 막대의 빈 곳 우클릭: 새 폴더, 크롬에서 가져오기
+// 다 들어가지 않는 북마크는 숨기고 » 메뉴로 (크롬처럼)
+function layoutBar() {
+  const main = $("bm-items"), chev = $("bm-chevron");
+  if (!main) return;
+  const btns = [...main.querySelectorAll(":scope > .bm")];
+  btns.forEach((b) => (b.hidden = false));
+  chev.hidden = true;
+  overflowItems = [];
+  const barItems = bookmarks.filter((n) => !(n.type === "folder" && RIGHT_FOLDERS.includes(n.title)));
+  const limit = main.clientWidth;
+  let cut = btns.findIndex((b) => b.offsetLeft + b.offsetWidth > limit);
+  if (cut === -1) return;
+  chev.hidden = false;
+  const limit2 = main.clientWidth; // » 가 자리를 차지한 뒤 다시 계산
+  cut = btns.findIndex((b) => b.offsetLeft + b.offsetWidth > limit2);
+  if (cut === -1) cut = btns.length;
+  btns.slice(cut).forEach((b) => (b.hidden = true));
+  overflowItems = barItems.slice(cut);
+}
+new ResizeObserver(() => layoutBar()).observe($("bookmarks"));
+
+// 막대 빈 곳 우클릭: 새 폴더, 크롬에서 가져오기, 막대 숨기기
 $("bookmarks").addEventListener("contextmenu", async (e) => {
-  if (e.target !== $("bookmarks")) return;
+  if (e.target.closest(".bm")) return;
   e.preventDefault();
   handleBmAction(await bmApi.barMenu());
 });
+// Ctrl+Shift+B: 북마크 막대 보이기/숨기기 (크롬처럼)
+function setBookmarkBar(show) {
+  document.body.classList.toggle("bm-hidden", !show);
+  try { localStorage.setItem("bookmarkBar", show ? "1" : "0"); } catch {}
+}
+try { setBookmarkBar(localStorage.getItem("bookmarkBar") !== "0"); } catch { setBookmarkBar(true); }
+
 async function toggleBookmark() {
   const url = currentUrl();
   if (!/^https?:/i.test(url)) return;
@@ -290,8 +471,9 @@ async function toggleBookmark() {
   handleBmAction(await bmApi.chooseFolder(id, ...below($("bookmark"))));
 }
 $("bookmark").onclick = toggleBookmark;
-bmApi.onChanged((tree) => { bookmarks = tree; renderBookmarks(); updateStar(); });
-bmApi.list().then((tree) => { bookmarks = tree; renderBookmarks(); updateStar(); });
+bmApi.onChanged((tree) => { bookmarks = tree; closeMenus(); renderBookmarks(); updateStar(); });
+bmApi.onFavicons((f) => { favMap = f; renderBookmarks(); });
+Promise.all([bmApi.list(), bmApi.favicons()]).then(([tree, f]) => { bookmarks = tree; favMap = f || {}; renderBookmarks(); updateStar(); });
 
 
 async function getPage() {
