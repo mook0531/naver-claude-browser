@@ -429,15 +429,23 @@ async function useCurrentTab() {
 
 // ---------- 북마크 ----------
 const listBookmarks = async () => {
-  const list = bmApi ? bmApi.list() : [];
-  return list.length ? `북마크 ${list.length}개\n` + list.map((b, i) => `${i + 1}. ${b.title} — ${b.url}`).join("\n") : "북마크가 없습니다.";
+  const list = bmApi ? bmApi.list() : []; // [{ title, url, folder: "업무/광고" }]
+  if (!list.length) return "북마크가 없습니다.";
+  const byFolder = new Map();
+  for (const b of list) { const f = b.folder || ""; if (!byFolder.has(f)) byFolder.set(f, []); byFolder.get(f).push(b); }
+  const lines = [`북마크 ${list.length}개 (폴더 ${bmApi.folders().length}개)`];
+  for (const [f, items] of byFolder) {
+    lines.push(f ? `📁 ${f}` : "북마크 막대");
+    for (const b of items) lines.push(`  - ${b.title} — ${b.url}`);
+  }
+  return lines.join("\n");
 };
-async function addBookmark(title, url) {
+async function addBookmark(title, url, folder) {
   if (!bmApi) throw new Error("북마크 기능을 쓸 수 없습니다.");
   url = url || ready().getURL();
   title = title || (url === ready().getURL() ? ready().getTitle() : url);
-  bmApi.add(title, url);
-  return `북마크했습니다: ${title} — ${url}`;
+  bmApi.add(title, url, folder || null);
+  return `북마크했습니다: ${title} — ${url}${folder ? ` (📁 ${folder})` : " (북마크 막대)"}`;
 }
 
 // 화면 캡처: 좌표가 클릭 좌표(CSS 픽셀)와 같도록 크기를 맞춘다

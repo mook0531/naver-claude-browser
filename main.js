@@ -336,7 +336,7 @@ function suggest(q) {
     seen.add(key);
     out.push({ type, title: title || key, url, prefix: b.startsWith(q), score: score + base });
   };
-  for (const b of loadBookmarks()) add("bookmark", b.title, b.url, 60);
+  for (const b of bm.flatten()) add("bookmark", b.title, b.url, 60);
   const now = Date.now();
   for (const [url, e] of Object.entries(loadHistory())) {
     const ageDays = (now - e.last) / 86400000;
@@ -360,54 +360,132 @@ ipcMain.handle("ui:overlay", async (e, open) => {
   return null;
 });
 
-// ---------- 북마크 ----------
-// 모든 창이 같이 쓰고, 사용자 데이터 폴더의 bookmarks.json에 저장한다.
-const DEFAULT_BOOKMARKS = [
-  { title: "네이버", url: "https://www.naver.com/" },
-  { title: "네이버 부동산", url: "https://land.naver.com/" },
-  { title: "네이버 광고", url: "https://searchad.naver.com/" },
-];
-const bmPath = () => path.join(app.getPath("userData"), "bookmarks.json");
-function loadBookmarks() {
-  try { const b = JSON.parse(fs.readFileSync(bmPath(), "utf8")); if (Array.isArray(b)) return b; } catch {}
-  return DEFAULT_BOOKMARKS.map((b) => ({ ...b }));
+// ---------- 북마크 (크롬처럼 폴더) ----------
+// 저장·트리 조작은 bookmarks.js. 여기서는 화면과 연결하고, 크롬처럼 폴더 메뉴·우클릭 메뉴를 띄운다.
+const bm = require("./bookmarks").createStore(
+  () => path.join(app.getPath("userData"), "bookmarks.json"),
+  (tree) => { for (const w of BrowserWindow.getAllWindows()) w.webContents.send("bm:changed", tree); }, // 모든 창에 반영
+);
+const sameUrl = bm.sameUrl;
+
+// 북마크 열기: here = 지금 탭, newtab = 새 탭, background = 뒤쪽 새 탭, newwindow = 새 창
+function openBookmarkIn(win, url, mode = "here") {
+  const info = win && wins.get(win.id);
+  if (mode === "newwindow" || !info) return createWindow(url);
+  if (mode === "newtab" || mode === "background") return createTab(info, url, { activate: mode === "newtab" });
+  const wc = activeWc(info);
+  if (wc) { wc.loadURL(url).catch(() => {}); wc.focus(); }
 }
-function saveBookmarks(list) {
-  fs.mkdirSync(path.dirname(bmPath()), { recursive: true });
-  fs.writeFileSync(bmPath(), JSON.stringify(list, null, 2));
-  for (const w of BrowserWindow.getAllWindows()) w.webContents.send("bm:changed", list); // 모든 창에 반영
-  return list;
+const modeFromEvent = (ev) => (ev && (ev.ctrlKey || ev.metaKey) ? "background" : ev && ev.shiftKey ? "newwindow" : "here");
+function openAll(win, folderId) {
+  const n = bm.get(folderId);
+  if (!n) return;
+  const urls = [];
+  const walk = (list) => { for (const x of list) { if (x.type === "url") urls.push(x.url); else walk(x.children); } };
+  walk(n.children);
+  urls.slice(0, 30).forEach((u, i) => openBookmarkIn(win, u, i === 0 ? "newtab" : "background")); // 한 번에 최대 30개
 }
-const sameUrl = (a, b) => String(a).replace(/\/$/, "") === String(b).replace(/\/$/, "");
-function addBookmark(title, url) {
-  if (!/^https?:/i.test(url)) throw new Error("http/https 주소만 북마크할 수 있습니다.");
-  const list = loadBookmarks();
-  const found = list.find((b) => sameUrl(b.url, url));
-  if (found) found.title = title || found.title; else list.push({ title: (title || url).slice(0, 80), url });
-  return saveBookmarks(list);
+
+// 폴더 내용을 크롬처럼 펼침 메뉴로 (하위 폴더는 옆으로 펼쳐짐)
+function folderMenuTemplate(win, node) {
+  const items = node.children.map((x) => x.type === "folder"
+    ? { label: "📁 " + x.title, submenu: folderMenuTemplate(win, x) }
+    : { label: x.title, toolTip: x.url, click: (_mi, _w, ev) => openBookmarkIn(win, x.url, modeFromEvent(ev)) });
+  if (!items.length) items.push({ label: "(비어 있음)", enabled: false });
+  const count = bm.count(node.id);
+  if (count) items.push({ type: "separator" }, { label: `모두 새 탭으로 열기 (${count}개)`, click: () => openAll(win, node.id) });
+  return items;
 }
-const removeBookmark = (url) => saveBookmarks(loadBookmarks().filter((b) => !sameUrl(b.url, url)));
-ipcMain.handle("bm:list", () => loadBookmarks());
-ipcMain.handle("bm:add", (_e, title, url) => addBookmark(title, url));
-ipcMain.handle("bm:remove", (_e, url) => removeBookmark(url));
-ipcMain.handle("bm:rename", (_e, url, title) => {
-  const list = loadBookmarks(); const b = list.find((x) => sameUrl(x.url, url));
-  if (b && title && title.trim()) b.title = title.trim().slice(0, 80);
-  return saveBookmarks(list);
-});
-// 북마크 우클릭 메뉴 (고른 항목을 돌려줌)
-ipcMain.handle("bm:menu", (e) => new Promise((resolve) => {
-  let picked = null;
-  const menu = Menu.buildFromTemplate([
-    { label: "새 탭에서 열기", click: () => { picked = "newtab"; } },
-    { label: "새 창에서 열기", click: () => { picked = "newwindow"; } },
-    { type: "separator" },
-    { label: "이름 바꾸기", click: () => { picked = "rename"; } },
-    { label: "삭제", click: () => { picked = "remove"; } },
-  ]);
-  menu.popup({ window: BrowserWindow.fromWebContents(e.sender), callback: () => setTimeout(() => resolve(picked), 0) });
-}));
+ipcMain.handle("bm:list", () => bm.load());
+ipcMain.handle("bm:add", (_e, title, url, folderId) => bm.add(title, url, folderId || null));
+ipcMain.handle("bm:remove", (_e, id) => bm.remove(id));
+ipcMain.handle("bm:remove-url", (_e, url) => bm.removeUrl(url));
+ipcMain.handle("bm:rename", (_e, id, title) => bm.rename(id, title));
+ipcMain.handle("bm:new-folder", (_e, title, parentId) => bm.addFolder(title, parentId || null));
+ipcMain.handle("bm:move", (_e, id, folderId) => bm.move(id, folderId || null));
+ipcMain.on("bm:open", (e, url, mode) => openBookmarkIn(BrowserWindow.fromWebContents(e.sender), url, mode));
 ipcMain.on("bm:open-window", (_e, url) => createWindow(url));
+
+// 폴더 버튼을 누르면 펼침 메뉴 (x, y: 버튼 아래 위치)
+ipcMain.handle("bm:folder-popup", (e, id, x, y) => new Promise((resolve) => {
+  const win = BrowserWindow.fromWebContents(e.sender), node = bm.get(id);
+  if (!node) return resolve();
+  Menu.buildFromTemplate(folderMenuTemplate(win, node)).popup({ window: win, x: Math.round(x), y: Math.round(y), callback: () => resolve() });
+}));
+
+// "폴더로 이동" 하위 메뉴: 북마크 막대 + 모든 폴더 (자기 자신과 그 안은 제외)
+function moveTargets(id, pick) {
+  const self = bm.get(id);
+  const inside = new Set();
+  if (self && self.type === "folder") { const walk = (l) => { for (const x of l) if (x.type === "folder") { inside.add(x.id); walk(x.children); } }; inside.add(self.id); walk(self.children); }
+  return [
+    { label: "북마크 막대", click: () => pick(null) },
+    ...bm.folders().filter((f) => !inside.has(f.id)).map((f) => ({ label: "    ".repeat(f.depth) + "📁 " + f.title, click: () => pick(f.id) })),
+  ];
+}
+
+// 북마크·폴더 우클릭 메뉴. 이름 입력이 필요한 동작은 화면 쪽에 { action }으로 돌려준다.
+ipcMain.handle("bm:menu", (e, id) => new Promise((resolve) => {
+  const win = BrowserWindow.fromWebContents(e.sender), node = bm.get(id);
+  if (!node) return resolve(null);
+  let picked = null;
+  const done = (v) => { picked = v; };
+  const tpl = node.type === "url" ? [
+    { label: "열기", click: () => openBookmarkIn(win, node.url, "here") },
+    { label: "새 탭에서 열기", click: () => openBookmarkIn(win, node.url, "newtab") },
+    { label: "새 창에서 열기", click: () => openBookmarkIn(win, node.url, "newwindow") },
+    { type: "separator" },
+    { label: "이름 바꾸기…", click: () => done({ action: "rename", id, title: node.title }) },
+    { label: "폴더로 이동", submenu: moveTargets(id, (fid) => bm.move(id, fid)) },
+    { label: "새 폴더…", click: () => done({ action: "newfolder", parentId: null }) },
+    { type: "separator" },
+    { label: "삭제", click: () => bm.remove(id) },
+  ] : [
+    { label: `모두 새 탭으로 열기 (${bm.count(id)}개)`, enabled: bm.count(id) > 0, click: () => openAll(win, id) },
+    { type: "separator" },
+    { label: "이름 바꾸기…", click: () => done({ action: "rename", id, title: node.title }) },
+    { label: "폴더로 이동", submenu: moveTargets(id, (fid) => { try { bm.move(id, fid); } catch {} }) },
+    { label: "이 폴더 안에 새 폴더…", click: () => done({ action: "newfolder", parentId: id }) },
+    { type: "separator" },
+    { label: `폴더 삭제${bm.count(id) ? ` (안의 북마크 ${bm.count(id)}개 포함)` : ""}`, click: async () => {
+      if (bm.count(id)) {
+        const { response } = await dialog.showMessageBox(win, { type: "warning", buttons: ["삭제", "취소"], defaultId: 1, cancelId: 1, noLink: true,
+          message: `"${node.title}" 폴더를 삭제할까요?`, detail: `안에 있는 북마크 ${bm.count(id)}개도 함께 삭제됩니다.` });
+        if (response !== 0) return;
+      }
+      bm.remove(id);
+    } },
+  ];
+  Menu.buildFromTemplate(tpl).popup({ window: win, callback: () => setTimeout(() => resolve(picked), 0) });
+}));
+
+// 북마크 막대 빈 곳 우클릭
+ipcMain.handle("bm:bar-menu", (e) => new Promise((resolve) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  let picked = null;
+  Menu.buildFromTemplate([
+    { label: "새 폴더…", click: () => { picked = { action: "newfolder", parentId: null }; } },
+    { label: "크롬에서 가져오기", click: () => importChromeWithDialog(win) },
+  ]).popup({ window: win, callback: () => setTimeout(() => resolve(picked), 0) });
+}));
+
+// ☆로 추가한 뒤 "어느 폴더에 둘까요?" 메뉴 (크롬의 북마크 추가 창 대신)
+ipcMain.handle("bm:choose-folder", (e, id, x, y) => new Promise((resolve) => {
+  const win = BrowserWindow.fromWebContents(e.sender), node = bm.get(id);
+  if (!node) return resolve(null);
+  let picked = null;
+  const cur = bm.findUrl(node.url);
+  Menu.buildFromTemplate([
+    { label: "북마크를 추가했습니다 — 저장할 폴더:", enabled: false },
+    { type: "separator" },
+    { label: "북마크 막대", type: "radio", checked: !cur.folder, click: () => bm.move(id, null) },
+    ...bm.folders().map((f) => ({ label: "    ".repeat(f.depth) + "📁 " + f.title, type: "radio", checked: cur.folder === f.path, click: () => bm.move(id, f.id) })),
+    { type: "separator" },
+    { label: "새 폴더를 만들어 저장…", click: () => { picked = { action: "newfolder-move", id }; } },
+    { label: "이름 바꾸기…", click: () => { picked = { action: "rename", id, title: node.title }; } },
+    { label: "북마크 삭제", click: () => bm.remove(id) },
+  ]).popup({ window: win, x: Math.round(x), y: Math.round(y), callback: () => setTimeout(() => resolve(picked), 0) });
+}));
 
 // 크롬 북마크 가져오기: 크롬의 모든 프로필에 있는 Bookmarks 파일(JSON)을 읽어 중복 없이 추가
 function chromeBookmarkFiles() { return chromeProfileFiles("Bookmarks"); }
@@ -433,27 +511,9 @@ function chromeProfileFiles(name) {
 function importChromeBookmarks() {
   const files = chromeBookmarkFiles();
   if (!files.length) return { files: 0, found: 0, added: 0 };
-  const found = [];
-  const walk = (node) => {
-    if (!node) return;
-    if (node.type === "url" && /^https?:/i.test(node.url || "")) found.push({ title: (node.name || node.url).slice(0, 80), url: node.url });
-    for (const c of node.children || []) walk(c);
-  };
-  for (const f of files) {
-    try {
-      const roots = JSON.parse(fs.readFileSync(f, "utf8")).roots || {};
-      for (const key of ["bookmark_bar", "other", "synced"]) walk(roots[key]); // 북마크바 → 기타 → 모바일 순서
-    } catch {}
-  }
-  const list = loadBookmarks();
-  let added = 0;
-  for (const b of found) {
-    if (list.some((x) => sameUrl(x.url, b.url))) continue;
-    list.push(b);
-    added++;
-  }
-  if (added) saveBookmarks(list);
-  return { files: files.length, found: found.length, added };
+  const roots = [];
+  for (const f of files) { try { roots.push(JSON.parse(fs.readFileSync(f, "utf8")).roots || {}); } catch {} }
+  return { files: files.length, ...bm.mergeChrome(roots) }; // 크롬 폴더 구조 그대로, 이미 있는 주소는 건너뜀
 }
 // 크롬 방문 기록 가져오기: 크롬의 History(SQLite)는 크롬이 켜져 있으면 잠겨 있을 수 있어 임시 복사본을 읽는다
 function importChromeHistory() {
@@ -489,19 +549,19 @@ function importChromeHistory() {
 }
 
 async function importChromeWithDialog(win, what = "all") {
-  const bm = what !== "history" ? importChromeBookmarks() : null;
+  const bmRes = what !== "history" ? importChromeBookmarks() : null;
   const hi = what !== "bookmarks" ? importChromeHistory() : null;
-  const none = (!bm || !bm.files) && (!hi || !hi.files);
+  const none = (!bmRes || !bmRes.files) && (!hi || !hi.files);
   const lines = [];
-  if (bm && bm.files) lines.push(`북마크: ${bm.found}개 중 ${bm.added}개 새로 추가 (이미 있는 ${bm.found - bm.added}개 건너뜀)`);
+  if (bmRes && bmRes.files) lines.push(`북마크: ${bmRes.found}개 중 ${bmRes.added}개 새로 추가, 크롬 폴더 구조 그대로 (이미 있는 ${bmRes.found - bmRes.added}개 건너뜀)`);
   if (hi && hi.files) lines.push(`방문 기록: ${hi.found.toLocaleString("ko-KR")}개 중 ${hi.added.toLocaleString("ko-KR")}개 새로 추가` + (hi.failed ? ` · 프로필 ${hi.failed}개는 읽지 못함(크롬을 닫고 다시 해 보세요)` : ""));
   const message = none ? "크롬 데이터를 찾지 못했습니다." : "크롬에서 가져왔습니다.";
   const detail = none ? "이 컴퓨터에 크롬이 설치되어 있는지 확인해 주세요." : lines.join("\n");
   if (win) await dialog.showMessageBox(win, { type: "info", title: "크롬에서 가져오기", message, detail, buttons: ["확인"], noLink: true });
-  return { bookmarks: bm, history: hi };
+  return { bookmarks: bmRes, history: hi };
 }
 ipcMain.handle("bm:import-chrome", (e) => importChromeWithDialog(BrowserWindow.fromWebContents(e.sender)));
-driver.setBookmarks({ list: loadBookmarks, add: addBookmark });
+driver.setBookmarks({ list: () => bm.flatten(), add: (title, url, folder) => bm.add(title, url, folder ? bm.ensureFolderPath(folder) : null), folders: () => bm.folders() });
 
 // ---------- 네이버 쇼핑 API 설정 ----------
 let settingsWin = null;

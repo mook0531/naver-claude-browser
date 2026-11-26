@@ -149,11 +149,12 @@ function buildServer(onActivity, sid) {
   tool("new_tab", "새 탭을 열고 그 탭으로 전환합니다. url을 주면 그 주소를 엽니다(기본: 네이버 홈). 여러 페이지를 비교할 때 쓰세요.",
     { url: z.string().optional() }, (a) => `➕ 새 탭${a.url ? ": " + a.url : ""}`, (a) => b.newTab(a.url));
 
-  tool("list_bookmarks", "사용자가 저장해 둔 북마크(이름, 주소)를 돌려줍니다. \"북마크한 ○○ 열어 줘\" 같은 요청이면 여기서 주소를 찾아 navigate나 new_tab으로 여세요.", {},
+  tool("list_bookmarks", "사용자가 저장해 둔 북마크(이름, 주소)를 폴더별로 돌려줍니다. \"북마크한 ○○ 열어 줘\" 같은 요청이면 여기서 주소를 찾아 navigate나 new_tab으로 여세요.", {},
     () => "🔖 북마크 목록", () => b.listBookmarks(), true);
 
-  tool("add_bookmark", "북마크를 추가합니다. url을 생략하면 지금 페이지를 북마크합니다. 사용자가 요청한 경우에만 쓰세요.",
-    { title: z.string().optional(), url: z.string().optional() }, (a) => `🔖 북마크 추가${a.title ? ": " + a.title : ""}`, (a) => b.addBookmark(a.title, a.url));
+  tool("add_bookmark", "북마크를 추가합니다. url을 생략하면 지금 페이지를 북마크합니다. folder에 '업무/광고'처럼 폴더 경로를 주면 그 폴더에 넣습니다(없으면 만듦). 사용자가 요청한 경우에만 쓰세요.",
+    { title: z.string().optional(), url: z.string().optional(), folder: z.string().optional().describe("폴더 경로, 예: '부동산' 또는 '업무/광고'. 생략하면 북마크 막대") },
+    (a) => `🔖 북마크 추가${a.title ? ": " + a.title : ""}`, (a) => b.addBookmark(a.title, a.url, a.folder));
 
   tool("new_window", "새 브라우저 창을 열고 그 창의 탭으로 전환합니다. 사용자가 창을 나눠 보고 싶어 하거나, 서로 다른 작업을 나란히 띄울 때 쓰세요. 보통은 new_tab으로 충분합니다.",
     { url: z.string().optional() }, (a) => `🪟 새 창${a.url ? ": " + a.url : ""}`, (a) => b.newWindow(a.url));

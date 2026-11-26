@@ -17,15 +17,23 @@ contextBridge.exposeInMainWorld("api", {
 
   // 북마크
   bookmarks: {
-    list: () => ipcRenderer.invoke("bm:list"),
-    add: (title, url) => ipcRenderer.invoke("bm:add", title, url),
-    remove: (url) => ipcRenderer.invoke("bm:remove", url),
-    rename: (url, title) => ipcRenderer.invoke("bm:rename", url, title),
-    menu: () => ipcRenderer.invoke("bm:menu"),
+    list: () => ipcRenderer.invoke("bm:list"),                           // 폴더가 있는 트리
+    add: (title, url, folderId) => ipcRenderer.invoke("bm:add", title, url, folderId), // 새 항목 id
+    remove: (id) => ipcRenderer.invoke("bm:remove", id),
+    removeUrl: (url) => ipcRenderer.invoke("bm:remove-url", url),
+    rename: (id, title) => ipcRenderer.invoke("bm:rename", id, title),
+    newFolder: (title, parentId) => ipcRenderer.invoke("bm:new-folder", title, parentId),
+    move: (id, folderId) => ipcRenderer.invoke("bm:move", id, folderId),
+    open: (url, mode) => ipcRenderer.send("bm:open", url, mode),
+    folderPopup: (id, x, y) => ipcRenderer.invoke("bm:folder-popup", id, x, y),
+    menu: (id) => ipcRenderer.invoke("bm:menu", id),
+    barMenu: () => ipcRenderer.invoke("bm:bar-menu"),
+    chooseFolder: (id, x, y) => ipcRenderer.invoke("bm:choose-folder", id, x, y),
     openWindow: (url) => ipcRenderer.send("bm:open-window", url),
     importChrome: () => ipcRenderer.invoke("bm:import-chrome"),
-    onChanged: (cb) => ipcRenderer.on("bm:changed", (_e, list) => cb(list)),
+    onChanged: (cb) => ipcRenderer.on("bm:changed", (_e, tree) => cb(tree)),
   },
+
 
   // 탭과 이동
   tabs: {

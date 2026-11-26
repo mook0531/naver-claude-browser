@@ -25,6 +25,13 @@ button:hover { background: #eef; }
 #bookmarks:empty::before { content: "☆ 버튼(Ctrl+D)으로 자주 가는 페이지를 북마크하세요"; color: #999; font-size: 12px; }
 .bm { border: 0; background: none; border-radius: 6px; padding: 3px 10px; font-size: 13px; white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; color: #333; }
 .bm:hover { background: #eef0f3; }
+.bm-folder { font-weight: 600; }
+#modal { position: fixed; top: 120px; left: 50%; transform: translateX(-50%); width: min(380px, calc(100vw - 32px)); background: #fff; border: 1px solid #ccd; border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,.2); padding: 14px 16px; z-index: 100; display: flex; flex-direction: column; gap: 10px; }
+#modal[hidden] { display: none; }
+#modal-title { font-weight: 700; }
+#modal-input { font: inherit; padding: 6px 10px; border: 1px solid #ccd; border-radius: 6px; }
+.modal-row { display: flex; justify-content: flex-end; gap: 6px; }
+#modal-ok { background: #d97757; border-color: #d97757; color: #fff; }
 .bm-import { color: #888; margin-left: auto; }
 .bm-edit { font: inherit; font-size: 13px; padding: 2px 6px; border: 1px solid #d97757; border-radius: 6px; width: 140px; }
 /* 페이지 자리: 실제 페이지(WebContentsView)는 main이 이 위치에 겹쳐 띄운다 */

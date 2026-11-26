@@ -61,7 +61,7 @@ Claude가 쓸 수 있는 도구: `naver_search`, `navigate`, `get_page_text`, `r
 
 **탭**: 위쪽 탭 바의 **+**(Ctrl+T)로 새 탭, **×**(Ctrl+W)로 닫기, Ctrl+Tab으로 전환합니다. 새 창으로 여는 링크는 새 탭으로 열립니다(Ctrl+클릭은 뒤쪽 탭, Shift+클릭은 새 창).
 
-**북마크**: 주소창 옆 **☆**(Ctrl+D)로 지금 페이지를 북마크하고, 주소창 아래 북마크 막대에서 엽니다(Ctrl+클릭·가운데 클릭: 새 탭, Shift+클릭: 새 창, 우클릭: 이름 바꾸기·삭제). 모든 창이 같이 쓰며 `bookmarks.json`(사용자 데이터 폴더)에 저장됩니다. Claude도 `list_bookmarks` · `add_bookmark`로 씁니다. 북마크 막대 끝의 **⤓ 크롬에서 가져오기**(또는 Alt → 파일 메뉴)로 크롬의 모든 프로필에서 **북마크와 방문 기록**을 중복 없이 가져옵니다(방문 기록은 프로필마다 최근 5000개, 주소창 자동완성에 쓰임).
+**북마크 (크롬처럼 폴더)**: 주소창 옆 **☆**(Ctrl+D)로 추가하면 저장할 폴더를 고르는 메뉴가 뜹니다. 북마크 막대의 **📁 폴더**를 누르면 펼침 메뉴(하위 폴더, **모두 새 탭으로 열기**)가 나옵니다. 우클릭으로 이름 바꾸기·**폴더로 이동**·새 폴더·삭제, 막대 빈 곳 우클릭으로 새 폴더. 북마크 클릭: 현재 탭, Ctrl/가운데 클릭: 새 탭, Shift+클릭: 새 창. 모든 창이 같이 쓰며 `bookmarks.json`에 트리로 저장됩니다(예전 형식은 자동 변환). **⤓ 크롬에서 가져오기**는 크롬의 폴더 구조 그대로 가져옵니다(기타·모바일 북마크는 같은 이름의 폴더로). Claude도 `list_bookmarks`(폴더별) · `add_bookmark`(폴더 지정)로 씁니다.
 
 **네이버 쇼핑 (공식 API)**: Claude는 쇼핑 가격·최저가를 네이버 공식 검색 API(`naver_shopping_search`)로 가져옵니다. 처음 한 번 Alt → 파일 → **네이버 쇼핑 API 설정**에서 [developers.naver.com](https://developers.naver.com)의 Client ID/Secret을 넣으세요(회사 아이디로 만든 키 하나를 함께 씀, 하루 25,000회).
 직원 PC에는 설정 창의 **직원용 키 파일 만들기**로 만든 `naver-api-key.json`을 브라우저 폴더에 넣고 브라우저를 켜면 자동 등록되고 파일은 지워집니다. 이 파일은 비밀 키가 들어 있으므로 사내로만 전달하세요(`.gitignore`에 포함).
@@ -102,6 +102,7 @@ Claude도 `list_tabs` · `new_tab` · `new_window` · `switch_tab` · `close_tab
 | `naver-browser.mcpb`, `extension/` | Claude 앱 확장 프로그램 (다시 만들기: `npm run build:extension`) |
 | `claude-plugin/`, `.claude-plugin/` | 새 Claude 앱용 플러그인(MCP 서버 + 사용 안내 스킬)과 마켓플레이스 |
 | `create-shortcut.js`, `assets/` | 바탕화면·시작 메뉴 바로가기와 아이콘 |
+| `bookmarks.js` | 북마크 트리 저장소(폴더, 이동, 크롬 병합) |
 | `setup-claude.js` | Claude 앱 설정에 연결 등록 (기존 설정 백업) |
 | `check-claude.js` | 연결 점검 |
 | `preload.js` | 화면에 노출하는 안전한 IPC API |

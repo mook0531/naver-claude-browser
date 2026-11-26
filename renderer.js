@@ -188,78 +188,110 @@ urlBox.addEventListener("keydown", (e) => {
 });
 urlBox.addEventListener("blur", () => setTimeout(closeSuggest, 120));
 urlBox.addEventListener("focus", () => urlBox.select());
-// ---------- 북마크 ----------
+// ---------- 북마크 (크롬처럼 폴더) ----------
+// bookmarks = 트리. 맨 위 배열 = 북마크 막대. 폴더 펼침·우클릭 메뉴는 main이 크롬처럼 띄운다.
 let bookmarks = [];
+const bmApi = window.api.bookmarks;
 const normUrl = (u) => String(u || "").replace(/\/$/, "");
 const currentUrl = () => activeTab().url || "";
+function findBookmarkByUrl(list, url) {
+  for (const n of list) {
+    if (n.type === "url" && normUrl(n.url) === normUrl(url)) return n;
+    if (n.type === "folder") { const f = findBookmarkByUrl(n.children, url); if (f) return f; }
+  }
+  return null;
+}
 function updateStar() {
   if (!state.activeId) return;
-  const on = bookmarks.some((b) => normUrl(b.url) === normUrl(currentUrl()));
+  const on = !!findBookmarkByUrl(bookmarks, currentUrl());
   const btn = $("bookmark");
   btn.classList.toggle("on", on);
   btn.textContent = on ? "★" : "☆";
-  btn.title = on ? "북마크 삭제 (Ctrl+D)" : "이 페이지 북마크 (Ctrl+D)";
+  btn.title = on ? "북마크 수정·삭제 (Ctrl+D)" : "이 페이지 북마크 (Ctrl+D)";
 }
-function openBookmark(url, where) {
-  if (where === "newtab") tabsApi.create(url, { activate: true });
-  else if (where === "background") tabsApi.create(url, { activate: false });
-  else if (where === "newwindow") window.api.bookmarks.openWindow(url);
-  else window.api.nav("load", url);
+const below = (el) => { const r = el.getBoundingClientRect(); return [r.left, r.bottom + 2]; };
+
+// 이름 입력 창 (페이지가 위에 덮여 있어서, 열린 동안 페이지를 그림으로 바꿔 보여준다)
+function askName(title, value = "") {
+  return new Promise(async (resolve) => {
+    const shot = await window.api.overlay(true);
+    $("views").style.backgroundImage = shot ? `url("${shot}")` : "";
+    const box = $("modal"), input = $("modal-input");
+    $("modal-title").textContent = title;
+    input.value = value;
+    box.hidden = false;
+    input.focus(); input.select();
+    let done = false;
+    const finish = (v) => {
+      if (done) return; done = true;
+      box.hidden = true;
+      window.api.overlay(false).then(() => { $("views").style.backgroundImage = ""; });
+      resolve(v);
+    };
+    onEnterAfterIme(input, () => finish(input.value.trim() || null)); // 한글 이름도 끝 글자까지
+    input.onkeydown = (e) => { if (e.key === "Escape") finish(null); };
+    $("modal-ok").onclick = () => finish(input.value.trim() || null);
+    $("modal-cancel").onclick = () => finish(null);
+  });
 }
-function startRename(btn, b) {
-  const input = document.createElement("input");
-  input.className = "bm-edit";
-  input.value = b.title;
-  btn.replaceWith(input);
-  input.focus(); input.select();
-  let done = false;
-  const finish = async (save) => {
-    if (done) return; done = true;
-    if (save && input.value.trim()) bookmarks = await window.api.bookmarks.rename(b.url, input.value.trim());
-    renderBookmarks();
-  };
-  onEnterAfterIme(input, () => finish(true)); // 한글 이름도 끝 글자까지
-  input.addEventListener("keydown", (e) => { if (e.key === "Escape") finish(false); });
-  input.addEventListener("blur", () => finish(true));
+// main이 돌려준 "이름이 필요한 동작" 처리
+async function handleBmAction(act) {
+  if (!act) return;
+  if (act.action === "rename") {
+    const name = await askName("이름 바꾸기", act.title);
+    if (name) await bmApi.rename(act.id, name);
+  } else if (act.action === "newfolder") {
+    const name = await askName("새 폴더 이름", "새 폴더");
+    if (name) await bmApi.newFolder(name, act.parentId || null);
+  } else if (act.action === "newfolder-move") {
+    const name = await askName("새 폴더 이름 (이 북마크를 넣을 폴더)", "새 폴더");
+    if (name) { const fid = await bmApi.newFolder(name, null); await bmApi.move(act.id, fid); }
+  }
 }
+
 function renderBookmarks() {
   const bar = $("bookmarks");
   bar.innerHTML = "";
   for (const b of bookmarks) {
     const btn = document.createElement("button");
-    btn.className = "bm";
-    btn.textContent = b.title;
-    btn.title = `${b.title}\n${b.url}\n(Ctrl+클릭: 새 탭 · 우클릭: 이름 바꾸기/삭제)`;
-    btn.onclick = (e) => openBookmark(b.url, e.ctrlKey || e.metaKey ? "background" : e.shiftKey ? "newwindow" : "here");
-    btn.onauxclick = (e) => { if (e.button === 1) openBookmark(b.url, "background"); };
-    btn.oncontextmenu = async (e) => {
-      e.preventDefault();
-      const action = await window.api.bookmarks.menu();
-      if (action === "newtab" || action === "newwindow") openBookmark(b.url, action);
-      else if (action === "remove") bookmarks = await window.api.bookmarks.remove(b.url), renderBookmarks(), updateStar();
-      else if (action === "rename") startRename(btn, b);
-    };
+    btn.className = "bm" + (b.type === "folder" ? " bm-folder" : "");
+    if (b.type === "folder") {
+      btn.textContent = "📁 " + b.title;
+      btn.title = `${b.title} (클릭: 펼치기 · 우클릭: 이름 바꾸기·이동·삭제)`;
+      btn.onclick = () => bmApi.folderPopup(b.id, ...below(btn));
+    } else {
+      btn.textContent = b.title;
+      btn.title = `${b.title}\n${b.url}\n(Ctrl+클릭: 새 탭 · 우클릭: 이름 바꾸기·폴더로 이동·삭제)`;
+      btn.onclick = (e) => bmApi.open(b.url, e.ctrlKey || e.metaKey ? "background" : e.shiftKey ? "newwindow" : "here");
+      btn.onauxclick = (e) => { if (e.button === 1) bmApi.open(b.url, "background"); };
+    }
+    btn.oncontextmenu = async (e) => { e.preventDefault(); e.stopPropagation(); handleBmAction(await bmApi.menu(b.id)); };
     bar.appendChild(btn);
   }
-  const imp = document.createElement("button"); // 맨 끝: 크롬 북마크 가져오기
+  const imp = document.createElement("button"); // 맨 끝: 크롬에서 가져오기
   imp.className = "bm bm-import";
   imp.textContent = "⤓ 크롬에서 가져오기";
-  imp.title = "크롬의 북마크와 방문 기록을 가져옵니다 (이미 있는 것은 건너뜀). 방문 기록은 주소창 자동완성에 쓰입니다.";
-  imp.onclick = () => window.api.bookmarks.importChrome();
+  imp.title = "크롬의 북마크(폴더 구조 그대로)와 방문 기록을 가져옵니다 (이미 있는 것은 건너뜀). 방문 기록은 주소창 자동완성에 쓰입니다.";
+  imp.onclick = () => bmApi.importChrome();
   bar.appendChild(imp);
 }
+// 막대의 빈 곳 우클릭: 새 폴더, 크롬에서 가져오기
+$("bookmarks").addEventListener("contextmenu", async (e) => {
+  if (e.target !== $("bookmarks")) return;
+  e.preventDefault();
+  handleBmAction(await bmApi.barMenu());
+});
 async function toggleBookmark() {
   const url = currentUrl();
   if (!/^https?:/i.test(url)) return;
-  const on = bookmarks.some((b) => normUrl(b.url) === normUrl(url));
-  let title = url;
-  title = activeTab().title || url;
-  bookmarks = on ? await window.api.bookmarks.remove(url) : await window.api.bookmarks.add(title, url);
-  renderBookmarks(); updateStar();
+  const existing = findBookmarkByUrl(bookmarks, url);
+  // 크롬처럼: 없으면 추가하고 폴더 고르기, 이미 있으면 같은 메뉴로 폴더·이름 바꾸기·삭제
+  const id = existing ? existing.id : await bmApi.add(activeTab().title || url, url, null);
+  handleBmAction(await bmApi.chooseFolder(id, ...below($("bookmark"))));
 }
 $("bookmark").onclick = toggleBookmark;
-window.api.bookmarks.onChanged((list) => { bookmarks = list; renderBookmarks(); updateStar(); });
-window.api.bookmarks.list().then((list) => { bookmarks = list; renderBookmarks(); updateStar(); });
+bmApi.onChanged((tree) => { bookmarks = tree; renderBookmarks(); updateStar(); });
+bmApi.list().then((tree) => { bookmarks = tree; renderBookmarks(); updateStar(); });
 
 
 async function getPage() {
