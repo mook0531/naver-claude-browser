@@ -226,14 +226,25 @@ function updateStar() {
   btn.title = on ? "북마크 수정·삭제 (Ctrl+D)" : "이 페이지 북마크 (Ctrl+D)";
 }
 const below = (el) => { const r = el.getBoundingClientRect(); return [r.left, r.bottom + 2]; };
+// 아이콘을 받아오지 못한 사이트는 다시 시도하지 않는다 (인증서가 맞지 않는 사이트 등에서 같은 오류가 반복되지 않게)
+const failedIcons = new Set(JSON.parse((() => { try { return localStorage.getItem("failedIcons") || "[]"; } catch { return "[]"; } })()));
 function iconFor(node) {
   if (node.type === "folder") { const s = document.createElement("span"); s.innerHTML = FOLDER_SVG; return s.firstChild; }
   const img = document.createElement("img");
   img.className = "ico";
   let origin = "";
   try { origin = new URL(node.url).origin; } catch {}
-  img.src = favMap[origin] || (origin ? origin + "/favicon.ico" : GLOBE);
-  img.onerror = () => { img.onerror = null; img.src = GLOBE; };
+  // 방문해서 기록된 아이콘이 있으면 그것, 없으면 사이트의 기본 아이콘을 한 번만 시도
+  const src = favMap[origin] || (origin && !failedIcons.has(origin) ? origin + "/favicon.ico" : "");
+  img.src = src || GLOBE;
+  img.onerror = () => {
+    img.onerror = null;
+    img.src = GLOBE;
+    if (origin && !favMap[origin]) {
+      failedIcons.add(origin);
+      try { localStorage.setItem("failedIcons", JSON.stringify([...failedIcons].slice(-500))); } catch {}
+    }
+  };
   return img;
 }
 const modeOf = (e) => (e.ctrlKey || e.metaKey || e.button === 1 ? "background" : e.shiftKey ? "newwindow" : "here");

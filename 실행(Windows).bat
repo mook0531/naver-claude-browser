@@ -19,8 +19,8 @@ if not exist "node_modules\electron\dist\electron.exe" goto noelectron
 
 :run
 echo Starting Naver + Claude Browser...
-call npm start
-if errorlevel 1 goto fail
+rem Open the browser without keeping this console window (engine logs are not shown).
+start "" "node_modules\electron\dist\electron.exe" .
 exit /b 0
 
 :nonode

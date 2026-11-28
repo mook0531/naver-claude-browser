@@ -727,6 +727,10 @@ ipcMain.handle("claude:abort", (_e, requestId) => {
   running.get(requestId)?.abort();
 });
 
+// 크롬 엔진의 내부 기록(SSL 연결 실패 등)이 까만 창에 쏟아지지 않게: 심각한 오류만 표시
+// (광고·추적 서버나 인증서가 맞지 않는 사이트 때문에 생기는 기록으로, 브라우저 동작과는 무관)
+app.commandLine.appendSwitch("log-level", "3");
+
 // 한 번에 하나의 앱만 실행 (Claude 연결 스크립트가 앱을 또 띄워도 기존 창을 사용)
 if (!app.requestSingleInstanceLock()) {
   app.quit();
