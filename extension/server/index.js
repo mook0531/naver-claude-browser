@@ -40,19 +40,37 @@ async function ensureApp() {
   if (await alive(info)) return info;
   if (!launching) {
     launching = (async () => {
-      log("브라우저 앱을 실행합니다...");
-      // 브라우저 앱 폴더: 이 파일 옆, 아니면 앱이 마지막으로 기록한 위치 (Claude 확장 프로그램으로 설치된 경우)
-      const appDir = [__dirname, info && info.appDir].find((d) => d && fs.existsSync(path.join(d, "node_modules", "electron", "path.txt")));
-      if (!appDir) throw new Error("네이버 + Claude 브라우저 앱을 찾지 못했습니다. 앱 폴더의 '실행(Windows).bat'으로 앱을 한 번 실행해 주세요.");
-      const electron = require(path.join(appDir, "node_modules", "electron")); // electron 실행 파일 경로
-      const child = spawn(electron, [appDir], { detached: true, stdio: "ignore", windowsHide: false });
-      child.unref();
-      for (let i = 0; i < 120; i++) { // 최대 60초 대기
-        await sleep(500);
-        info = readInfo();
-        if (await alive(info)) return info;
+      // 여러 Claude 대화가 동시에 시작해도 브라우저는 한 번만 켠다: 먼저 잠금 파일을 만든 쪽만 실행하고 나머지는 기다린다
+      const lockPath = path.join(path.dirname(INFO_PATH), "launch.lock");
+      let owner = false;
+      try {
+        fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+        try { if (Date.now() - fs.statSync(lockPath).mtimeMs > 60000) fs.rmSync(lockPath, { force: true }); } catch {} // 오래된 잠금은 정리
+        fs.closeSync(fs.openSync(lockPath, "wx"));
+        owner = true;
+      } catch { /* 다른 대화가 실행 중 */ }
+      try {
+        if (owner) {
+          log("브라우저 앱을 실행합니다...");
+          // 브라우저 앱 폴더: 이 파일 옆, 아니면 앱이 마지막으로 기록한 위치 (Claude 확장 프로그램으로 설치된 경우)
+          const appDir = [__dirname, info && info.appDir].find((d) => d && fs.existsSync(path.join(d, "node_modules", "electron", "path.txt")));
+          if (!appDir) throw new Error("네이버 + Claude 브라우저 앱을 찾지 못했습니다. 앱 폴더의 '실행(Windows).bat'으로 앱을 한 번 실행해 주세요.");
+          const electron = require(path.join(appDir, "node_modules", "electron")); // electron 실행 파일 경로
+          // --from-claude: 이미 켜져 있으면 새 창을 더 열지 않도록 표시
+          const child = spawn(electron, [appDir, "--from-claude"], { detached: true, stdio: "ignore", windowsHide: false });
+          child.unref();
+        } else {
+          log("다른 Claude 대화가 브라우저를 켜는 중입니다. 기다립니다...");
+        }
+        for (let i = 0; i < 120; i++) { // 최대 60초 대기
+          await sleep(500);
+          info = readInfo();
+          if (await alive(info)) return info;
+        }
+        throw new Error("브라우저 앱이 60초 안에 시작되지 않았습니다.");
+      } finally {
+        if (owner) fs.rmSync(lockPath, { force: true });
       }
-      throw new Error("브라우저 앱이 60초 안에 시작되지 않았습니다.");
     })().finally(() => { launching = null; });
   }
   return launching;

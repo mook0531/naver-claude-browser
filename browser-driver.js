@@ -295,15 +295,57 @@ async function guard(what, info) {
 const find = async (query) => `${where()}\n\n${await call(`__cb.find(${JSON.stringify(query)})`)}`;
 
 // 마우스 이벤트를 실제 사용자 클릭처럼 보낸다
+// ---------- 입력 보내기: 크롬 개발자 도구 프로토콜(CDP) ----------
+// Claude가 쓰는 창은 사용자의 작업을 방해하지 않도록 포커스 없이 떠 있는 경우가 많다.
+// 일반 키보드 이벤트는 포커스 없는 창에 전달되지 않으므로, CDP로 페이지에 직접 입력을 보낸다(포커스 필요 없음).
+async function cdp(c) {
+  const d = c.debugger;
+  if (!d.isAttached()) {
+    try {
+      d.attach("1.3");
+      // 페이지가 '포커스 없음'으로 판단해 입력을 무시하지 않도록 포커스가 있는 것처럼 동작시킨다
+      await d.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => {});
+    } catch { return null; } // 개발자 도구가 열려 있는 등으로 붙지 못하면 예전 방식으로
+  }
+  return d;
+}
+const KEYDEF = { // key 이름 → [code, keyCode]
+  Enter: ["Enter", 13], Tab: ["Tab", 9], Backspace: ["Backspace", 8], Escape: ["Escape", 27], Delete: ["Delete", 46], Space: ["Space", 32],
+  ArrowUp: ["ArrowUp", 38], ArrowDown: ["ArrowDown", 40], ArrowLeft: ["ArrowLeft", 37], ArrowRight: ["ArrowRight", 39],
+  Home: ["Home", 36], End: ["End", 35], PageUp: ["PageUp", 33], PageDown: ["PageDown", 34],
+};
+const CDP_KEY_ALIASES = { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight", esc: "Escape", return: "Enter", del: "Delete", pgdn: "PageDown", pgup: "PageUp", space: "Space" };
+function cdpKey(name) {
+  const k = CDP_KEY_ALIASES[name.toLowerCase()] || Object.keys(KEYDEF).find((x) => x.toLowerCase() === name.toLowerCase()) || name;
+  if (KEYDEF[k]) return { key: k === "Space" ? " " : k, code: KEYDEF[k][0], keyCode: KEYDEF[k][1], text: k === "Enter" ? "\r" : k === "Space" ? " " : "" };
+  if (/^f\d{1,2}$/i.test(k)) { const n = Number(k.slice(1)); return { key: "F" + n, code: "F" + n, keyCode: 111 + n, text: "" }; }
+  if (k.length === 1) {
+    const up = k.toUpperCase();
+    const code = /[a-z]/i.test(k) ? "Key" + up : /\d/.test(k) ? "Digit" + k : "";
+    return { key: k, code, keyCode: up.charCodeAt(0), text: k };
+  }
+  return { key: k, code: k, keyCode: 0, text: "" };
+}
+const MOD_BITS = { alt: 1, control: 2, meta: 4, shift: 8 };
+
 async function click({ ref, x, y, button = "left", clickCount = 1 }) {
   const c = ready();
   if (ref) ({ x, y } = await call(`__cb.center(${JSON.stringify(ref)})`));
   if (typeof x !== "number" || typeof y !== "number") throw new Error("ref 또는 x,y 좌표가 필요합니다.");
   await guard("버튼 누르기", await call(`__cb.infoAt(${x}, ${y})`));
-  c.sendInputEvent({ type: "mouseMove", x, y });
-  for (let i = 1; i <= clickCount; i++) {
-    c.sendInputEvent({ type: "mouseDown", x, y, button, clickCount: i });
-    c.sendInputEvent({ type: "mouseUp", x, y, button, clickCount: i });
+  const d = await cdp(c);
+  if (d) {
+    await d.sendCommand("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+    for (let i = 1; i <= clickCount; i++) {
+      await d.sendCommand("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button, clickCount: i });
+      await d.sendCommand("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button, clickCount: i });
+    }
+  } else {
+    c.sendInputEvent({ type: "mouseMove", x, y });
+    for (let i = 1; i <= clickCount; i++) {
+      c.sendInputEvent({ type: "mouseDown", x, y, button, clickCount: i });
+      c.sendInputEvent({ type: "mouseUp", x, y, button, clickCount: i });
+    }
   }
   await settle();
   return `클릭했습니다 (${x}, ${y}). ${where()}`;
@@ -313,7 +355,9 @@ async function typeText(text, ref) {
   if (ref) await call(`__cb.focus(${JSON.stringify(ref)})`);
   const f = await call("__cb.focused()");
   if (f && f.password) throw new Error("비밀번호 입력란에는 입력할 수 없습니다. 로그인은 사용자가 직접 해 주세요.");
-  ready().insertText(text);
+  const d = await cdp(ready());
+  if (d) await d.sendCommand("Input.insertText", { text }); // 창에 포커스가 없어도 들어감
+  else ready().insertText(text);
   await sleep(200);
   return "입력했습니다.";
 }
@@ -330,10 +374,20 @@ async function pressKey(text, repeat = 1) {
       if (!ok) throw new Error("사용자가 Enter(제출)를 허용하지 않았습니다.");
     }
   }
+  const d = await cdp(c);
   for (let i = 0; i < Math.min(repeat, 100); i++) {
     for (const chord of text.trim().split(/\s+/)) {
       const parts = chord.split("+");
       const modifiers = parts.slice(0, -1).map((m) => MODS[m.toLowerCase()]).filter(Boolean);
+      if (d) { // CDP: 포커스 없는 창에도 전달
+        const k = cdpKey(parts[parts.length - 1]);
+        const mods = modifiers.reduce((s, m) => s | (MOD_BITS[m] || 0), 0);
+        const withText = k.text && !modifiers.some((m) => m !== "shift");
+        const base = { key: k.key, code: k.code, windowsVirtualKeyCode: k.keyCode, nativeVirtualKeyCode: k.keyCode, modifiers: mods };
+        await d.sendCommand("Input.dispatchKeyEvent", { ...base, type: withText ? "keyDown" : "rawKeyDown", ...(withText ? { text: k.text, unmodifiedText: k.text } : {}) });
+        await d.sendCommand("Input.dispatchKeyEvent", { ...base, type: "keyUp" });
+        continue;
+      }
       let keyCode = parts[parts.length - 1];
       keyCode = KEY_ALIASES[keyCode.toLowerCase()] || keyCode;
       c.sendInputEvent({ type: "keyDown", keyCode, modifiers });

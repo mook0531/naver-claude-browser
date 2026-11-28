@@ -731,8 +731,8 @@ ipcMain.handle("claude:abort", (_e, requestId) => {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  // 이미 켜져 있을 때 아이콘을 또 누르면 새 창을 연다
-  app.on("second-instance", () => createWindow());
+  // 이미 켜져 있을 때 아이콘을 또 누르면 새 창을 연다 (Claude 연결이 실행한 경우는 창을 더 열지 않음)
+  app.on("second-instance", (_e, argv) => { if (!argv.includes("--from-claude")) createWindow(); });
   app.whenReady().then(() => {
     // 직원 PC: 앱 폴더에 넣어 둔 회사 공용 키 파일(naver-api-key.json)이 있으면 등록
     if (naverApi.importSharedKeyFile(__dirname)) console.log("네이버 쇼핑 API 키를 등록했습니다.");
